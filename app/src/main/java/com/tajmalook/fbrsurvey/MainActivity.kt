@@ -34,6 +34,11 @@ class MainActivity : AppCompatActivity() {
     private var records: List<Record> = emptyList()
     private lateinit var adapter: RecordAdapter
 
+    private val importLauncher =
+        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) importFbrData(uri)
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -78,15 +83,46 @@ class MainActivity : AppCompatActivity() {
         adapter.notifyDataSetChanged()
     }
 
+    // ---------- FBR data import ----------
+
+    private fun importFbrData(uri: Uri) {
+        @Suppress("DEPRECATION")
+        val progress = android.app.ProgressDialog(this).apply {
+            setMessage("Importing FBR data…"); setCancelable(false); show()
+        }
+        io.execute {
+            val msg = try {
+                val n = FbrLookup.import(this, uri)
+                String.format(Locale.ENGLISH, "FBR data imported ✓\n%,d CNICs ready for checking.", n)
+            } catch (e: Throwable) {
+                "Import failed: this is not a valid FBR_Lookup.fbr file.\n\n(${e.message})"
+            }
+            runOnUiThread {
+                progress.dismiss()
+                AlertDialog.Builder(this).setMessage(msg).setPositiveButton("OK", null).show()
+            }
+        }
+    }
+
     // ---------- About ----------
 
     override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
         menu.add(0, 1, 0, "About").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+        menu.add(0, 2, 1, "Import FBR data").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
         return true
     }
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
         if (item.itemId == 1) { showAbout(); return true }
+        if (item.itemId == 2) {
+            AlertDialog.Builder(this)
+                .setTitle("Import FBR data")
+                .setMessage("Choose the FBR_Lookup.fbr file made on the PC.\n\nIt replaces any FBR data already in the app.")
+                .setPositiveButton("Choose file") { _, _ -> importLauncher.launch(arrayOf("*/*")) }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return true
+        }
         return super.onOptionsItemSelected(item)
     }
 
@@ -119,6 +155,11 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }, es, length, 0)
+                val fbr = FbrLookup.info(this@MainActivity)
+                append("\n\nFBR data: ")
+                append(if (fbr == null) "not imported (Menu → Import FBR data)" else
+                    String.format(Locale.ENGLISH, "%,d CNICs, file made on %s", fbr.count,
+                        SimpleDateFormat("dd.MM.yyyy", Locale.ENGLISH).format(Date(fbr.createdSec * 1000))))
                 append("\n\nMap data © OpenStreetMap contributors.")
             }
             movementMethod = android.text.method.LinkMovementMethod.getInstance()

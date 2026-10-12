@@ -60,6 +60,8 @@ class FormActivity : AppCompatActivity() {
     private lateinit var rgFbr: RadioGroup
 
     private var editing: Record? = null
+    private var initialCnic = ""
+    private lateinit var fbrStatus: TextView
     private val captureFile by lazy { File(cacheDir, "capture.jpg") }
 
     private var photoTaken = false
@@ -129,6 +131,12 @@ class FormActivity : AppCompatActivity() {
         inAddress = findViewById(R.id.inAddress)
         rgFbr = findViewById(R.id.rgFbr)
         inCnic.addTextChangedListener(CnicFormatter(inCnic))
+        fbrStatus = findViewById(R.id.fbrStatus)
+        inCnic.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) { checkCnicOffline() }
+        })
 
         findViewById<MaterialButton>(R.id.btnSave).setOnClickListener { save() }
         findViewById<MaterialButton>(R.id.btnCheck).setOnClickListener { checkOnFbr() }
@@ -225,6 +233,7 @@ class FormActivity : AppCompatActivity() {
         inMarket.setText(r.market)
         inName.setText(r.businessName)
         inOwner.setText(r.ownerName)
+        initialCnic = r.cnic.filter { it.isDigit() }
         inCnic.setText(r.cnic)
         inPhone.setText(r.phone)
         inAddress.setText(r.address)
@@ -460,6 +469,41 @@ class FormActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://iris.fbr.gov.pk")))
         } catch (e: Exception) {
             toast("No browser found")
+        }
+    }
+
+    /** Looks the CNIC up in the imported FBR data; fills name and ticks Yes/No (always editable). */
+    private fun checkCnicOffline() {
+        val digits = inCnic.text?.toString().orEmpty().filter { it.isDigit() }
+        if (digits.length != 13) { fbrStatus.visibility = View.GONE; return }
+        if (io.isShutdown) return
+        io.execute {
+            val res = FbrLookup.lookup(this, digits)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (inCnic.text?.toString().orEmpty().filter { it.isDigit() } != digits) return@runOnUiThread
+                fbrStatus.visibility = View.VISIBLE
+                val auto = digits != initialCnic   // don't overwrite a saved record just by opening it
+                when {
+                    res == null -> {
+                        fbrStatus.text = "FBR data not imported (Home → Menu → Import FBR data)"
+                        fbrStatus.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
+                    }
+                    res.found -> {
+                        fbrStatus.text = if (res.name.isNotBlank()) "✓ Registered: ${res.name}" else "✓ Registered (found in FBR data)"
+                        fbrStatus.setTextColor(ContextCompat.getColor(this, R.color.green))
+                        if (auto) {
+                            rgFbr.check(R.id.rbYes)
+                            if (res.name.isNotBlank() && inOwner.text.isNullOrBlank()) inOwner.setText(res.name)
+                        }
+                    }
+                    else -> {
+                        fbrStatus.text = "✗ Not found in FBR data"
+                        fbrStatus.setTextColor(ContextCompat.getColor(this, R.color.red))
+                        if (auto) rgFbr.check(R.id.rbNo)
+                    }
+                }
+            }
         }
     }
 
