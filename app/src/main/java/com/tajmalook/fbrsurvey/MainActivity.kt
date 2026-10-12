@@ -150,10 +150,10 @@ class MainActivity : AppCompatActivity() {
                         Xlsx.Cell(r.phone.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
                         Xlsx.Cell(if (r.fbrRegistered) "Yes" else "No", Xlsx.CENTER),
                         Xlsx.Cell(dayFmt.format(Date(r.createdAt)), Xlsx.CENTER),
-                        Xlsx.Cell("View on Map", Xlsx.LINK, url),
+                        Xlsx.Cell(url, Xlsx.LINK, url),
                     )
                 }
-                val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 16.0)
+                val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 42.0)
                 file.outputStream().use {
                     Xlsx.writeReport(it, day ?: "Survey", title, header, rows, widths)
                 }
