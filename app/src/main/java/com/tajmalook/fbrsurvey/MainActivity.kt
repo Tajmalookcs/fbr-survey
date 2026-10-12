@@ -78,6 +78,59 @@ class MainActivity : AppCompatActivity() {
         adapter.notifyDataSetChanged()
     }
 
+    // ---------- About ----------
+
+    override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
+        menu.add(0, 1, 0, "About").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        if (item.itemId == 1) { showAbout(); return true }
+        return super.onOptionsItemSelected(item)
+    }
+
+    private fun showAbout() {
+        val version = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (e: Exception) { "" }
+        val email = "tajmalookcs@hotmail.com"
+        val pad = (20 * resources.displayMetrics.density).toInt()
+        val body = TextView(this).apply {
+            setPadding(pad, pad / 2, pad, 0)
+            textSize = 15f
+            setLineSpacing(0f, 1.2f)
+            text = android.text.SpannableStringBuilder().apply {
+                append("Version $version\n\n")
+                append("Field survey app for checking whether shops are registered with FBR. ")
+                append("Takes shop photos stamped with map, address, GPS coordinates, date and time, ")
+                append("records shop details, and exports a report in Excel.\n\n")
+                val start = length
+                append("Developer")
+                setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), start, length, 0)
+                append("\nTaj Malook\n")
+                val es = length
+                append(email)
+                setSpan(object : android.text.style.ClickableSpan() {
+                    override fun onClick(widget: View) {
+                        try {
+                            startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:$email"))
+                                .putExtra(Intent.EXTRA_SUBJECT, "FBR Shop Survey app"))
+                        } catch (e: Exception) {
+                            Toast.makeText(this@MainActivity, email, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }, es, length, 0)
+                append("\n\nMap data © OpenStreetMap contributors.")
+            }
+            movementMethod = android.text.method.LinkMovementMethod.getInstance()
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.app_name))
+            .setIcon(R.mipmap.ic_launcher)
+            .setView(body)
+            .setPositiveButton("OK", null)
+            .show()
+    }
+
     // ---------- Excel export ----------
 
     private fun export() {
