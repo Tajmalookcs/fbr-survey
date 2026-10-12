@@ -243,11 +243,14 @@ class FormActivity : AppCompatActivity() {
         gpsStatus.text = String.format(Locale.ENGLISH, "📍 %.6f, %.6f  •  %s", r.lat, r.lng,
             SimpleDateFormat("dd MMM yyyy hh:mm a", Locale.ENGLISH).format(Date(r.createdAt)))
         preview.setOnClickListener {
+            if (!Photo.galleryExists(this, Uri.parse(r.photoUri))) {
+                toast("Photo was deleted from the gallery. Tap Save to put it back."); return@setOnClickListener
+            }
             startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(r.photoUri), "image/*")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
         }
         io.execute {
-            val b = Photo.thumb(this, Uri.parse(r.photoUri), 900)
+            val b = Photo.thumbFor(this, r, 900)
             runOnUiThread { if (b != null) preview.setImageBitmap(b) }
         }
     }
@@ -395,6 +398,7 @@ class FormActivity : AppCompatActivity() {
                 Store.upsert(this, e)
                 // Redraw the stamp with the new details, if the original photo is kept.
                 var restamped = false
+                var restored = false
                 val raw = Store.rawPhoto(this, e.id)
                 if (raw.exists()) try {
                     val photo = Photo.loadUpright(raw)
@@ -402,12 +406,24 @@ class FormActivity : AppCompatActivity() {
                     val map = android.graphics.BitmapFactory.decodeFile(mapF.absolutePath)
                         ?: Geo.mapThumb(e.lat, e.lng, online = false)
                     Photo.stamp(photo, map, e)
-                    restamped = Photo.overwriteGallery(this, Uri.parse(e.photoUri), photo)
+                    val uri = Uri.parse(e.photoUri)
+                    if (e.photoUri.isNotBlank() && Photo.galleryExists(this, uri)) {
+                        restamped = Photo.overwriteGallery(this, uri, photo)
+                    } else {
+                        // deleted from gallery: save a fresh stamped copy and remember it
+                        e.photoUri = Photo.saveToGallery(this, photo, e.photoName).toString()
+                        Store.upsert(this, e)
+                        restored = true
+                    }
                     photo.recycle()
                 } catch (ex: Throwable) { }
                 runOnUiThread {
                     progress.dismiss()
-                    toast(if (restamped) "Updated ✓  Photo stamp updated too" else "Updated ✓")
+                    toast(when {
+                        restored -> "Updated ✓  Photo restored to Gallery → ${Photo.ALBUM}"
+                        restamped -> "Updated ✓  Photo stamp updated too"
+                        else -> "Updated ✓"
+                    })
                     finish()
                 }
             }

@@ -326,7 +326,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 img.setImageDrawable(null)
                 io.execute {
-                    val b = Photo.thumb(this@MainActivity, Uri.parse(r.photoUri)) ?: return@execute
+                    val b = Photo.thumbFor(this@MainActivity, r) ?: return@execute
                     thumbs.put(r.photoUri, b)
                     runOnUiThread { if (img.tag == r.photoUri) img.setImageBitmap(b) }
                 }

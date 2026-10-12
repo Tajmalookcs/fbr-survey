@@ -21,7 +21,7 @@ data class Record(
     val lat: Double,
     val lng: Double,
     val accuracy: Float,
-    val photoUri: String,
+    var photoUri: String,
     val photoName: String,
     var cnicNotProvided: Boolean = false,
     var boardPhone: String = "",

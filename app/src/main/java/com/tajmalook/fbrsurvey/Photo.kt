@@ -217,6 +217,32 @@ object Photo {
         }
     }
 
+    /** True if the gallery photo still exists (not deleted or moved to the gallery's trash). */
+    fun galleryExists(ctx: Context, uri: Uri): Boolean = try {
+        if (uri.scheme == "file") File(uri.path!!).exists()
+        else ctx.contentResolver.query(uri, arrayOf(MediaStore.Images.Media._ID), null, null, null)
+            ?.use { it.moveToFirst() } ?: false
+    } catch (e: Exception) {
+        false
+    }
+
+    /** Picture for the app's screens: the gallery photo, or the app's own clean copy if it was deleted. */
+    fun thumbFor(ctx: Context, r: Record, size: Int = 200): Bitmap? {
+        val uri = Uri.parse(r.photoUri)
+        if (r.photoUri.isNotBlank() && galleryExists(ctx, uri)) thumb(ctx, uri, size)?.let { return it }
+        val raw = Store.rawPhoto(ctx, r.id)
+        if (!raw.exists()) return null
+        return try {
+            val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(raw.absolutePath, o)
+            var s = 1
+            while (min(o.outWidth, o.outHeight) / (s * 2) >= size) s *= 2
+            BitmapFactory.decodeFile(raw.absolutePath, BitmapFactory.Options().apply { inSampleSize = s })
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     /** Replaces the gallery photo's content after an edit. Returns false if the old file is gone. */
     fun overwriteGallery(ctx: Context, uri: Uri, bmp: Bitmap): Boolean = try {
         if (uri.scheme == "file") {
