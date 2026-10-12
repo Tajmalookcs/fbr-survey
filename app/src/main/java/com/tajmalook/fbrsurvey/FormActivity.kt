@@ -56,7 +56,6 @@ class FormActivity : AppCompatActivity() {
     private lateinit var inOwner: TextInputEditText
     private lateinit var inCnic: TextInputEditText
     private lateinit var inPhone: TextInputEditText
-    private lateinit var inBoard: TextInputEditText
     private lateinit var cbNoCnic: android.widget.CheckBox
     private lateinit var inAddress: TextInputEditText
     private lateinit var rgFbr: RadioGroup
@@ -130,7 +129,6 @@ class FormActivity : AppCompatActivity() {
         inOwner = findViewById(R.id.inOwner)
         inCnic = findViewById(R.id.inCnic)
         inPhone = findViewById(R.id.inPhone)
-        inBoard = findViewById(R.id.inBoard)
         cbNoCnic = findViewById(R.id.cbNoCnic)
         cbNoCnic.setOnCheckedChangeListener { _, checked ->
             if (checked) { inCnic.setText(""); inCnic.error = null }
@@ -150,7 +148,6 @@ class FormActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.btnSave).setOnClickListener { save() }
         findViewById<MaterialButton>(R.id.btnCheck).setOnClickListener { checkOnFbr() }
         findViewById<MaterialButton>(R.id.btnCopyPhone).setOnClickListener { copyAndOpenBrowser(inPhone) }
-        findViewById<MaterialButton>(R.id.btnCopyBoard).setOnClickListener { copyAndOpenBrowser(inBoard) }
         gpsStatus.setOnClickListener { if (!hasLocation && editing == null) startLocation() }
 
         val id = intent.getLongExtra(EXTRA_ID, -1L)
@@ -240,7 +237,6 @@ class FormActivity : AppCompatActivity() {
         initialCnic = r.cnic.filter { it.isDigit() }
         inCnic.setText(r.cnic)
         inPhone.setText(r.phone)
-        inBoard.setText(r.boardPhone)
         cbNoCnic.isChecked = r.cnicNotProvided
         inAddress.setText(r.address)
         rgFbr.check(if (r.fbrRegistered) R.id.rbYes else R.id.rbNo)
@@ -360,9 +356,6 @@ class FormActivity : AppCompatActivity() {
             name.isEmpty() -> { inName.error = "Required"; inName.requestFocus(); return }
             cnic.isNotEmpty() && cnicDigits.length != 13 -> { inCnic.error = "CNIC must have 13 digits"; inCnic.requestFocus(); return }
             phone.isNotEmpty() && phoneDigits.length !in 10..13 -> { inPhone.error = "Check phone number"; inPhone.requestFocus(); return }
-            inBoard.text.toString().filter { it.isDigit() }.let { it.isNotEmpty() && it.length !in 10..13 } -> {
-                inBoard.error = "Check number"; inBoard.requestFocus(); return
-            }
             fbrId == -1 -> return toast("Select whether the shop is registered with FBR")
         }
         val fbr = fbrId == R.id.rbYes
@@ -394,7 +387,7 @@ class FormActivity : AppCompatActivity() {
         }
         val e = editing
         if (e != null) {
-            e.cnicNotProvided = cbNoCnic.isChecked; e.boardPhone = inBoard.text.toString().trim()
+            e.cnicNotProvided = cbNoCnic.isChecked
             e.surveyor = surveyor; e.formation = formation; e.area = area; e.market = market
             e.businessName = name; e.ownerName = owner; e.cnic = cnic; e.phone = phone
             e.address = address; e.fbrRegistered = fbr
@@ -422,7 +415,7 @@ class FormActivity : AppCompatActivity() {
         }
 
         val la = lat; val ln = lng; val acc = accuracy; val time = captureTime
-        val noCnic = cbNoCnic.isChecked; val board = inBoard.text.toString().trim()
+        val noCnic = cbNoCnic.isChecked
         io.execute {
             try {
                 val map = try {
@@ -435,7 +428,7 @@ class FormActivity : AppCompatActivity() {
                 val draft = Record(
                     id = time, createdAt = time,
                     surveyor = surveyor, formation = formation, area = area, market = market,
-                    cnicNotProvided = noCnic, boardPhone = board,
+                    cnicNotProvided = noCnic,
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
                     fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
                     photoUri = "", photoName = fileName,
