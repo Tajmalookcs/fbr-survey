@@ -94,8 +94,38 @@ class FormActivity : AppCompatActivity() {
                     .setCancelable(false)
                     .show()
             } else {
-                startLocation()
                 openCamera()
+            }
+        }
+
+    /** In-app camera with live stamp preview. */
+    private val inAppCameraLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+            val data = res.data
+            if (res.resultCode == RESULT_OK && data?.getBooleanExtra(CameraActivity.RES_USE_SYSTEM, false) == true) {
+                openSystemCamera()
+                return@registerForActivityResult
+            }
+            if (res.resultCode == RESULT_OK && captureFile.exists() && captureFile.length() > 0) {
+                photoTaken = true
+                captureTime = System.currentTimeMillis()
+                showPreview()
+                if (data != null && data.hasExtra(CameraActivity.RES_LAT)) {
+                    lat = data.getDoubleExtra(CameraActivity.RES_LAT, 0.0)
+                    lng = data.getDoubleExtra(CameraActivity.RES_LNG, 0.0)
+                    accuracy = data.getFloatExtra(CameraActivity.RES_ACC, 0f)
+                    hasLocation = true
+                    data.getStringExtra(CameraActivity.RES_ADDR)?.let { a ->
+                        val cur = inAddress.text?.toString().orEmpty()
+                        if (cur.isBlank() || cur == autoAddress) inAddress.setText(a)
+                        autoAddress = a
+                    }
+                    onLocation(null)
+                } else if (!hasLocation) {
+                    startLocation()
+                }
+            } else if (!photoTaken) {
+                finish() // cancelled the very first photo
             }
         }
 
@@ -184,7 +214,6 @@ class FormActivity : AppCompatActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) needed += Manifest.permission.WRITE_EXTERNAL_STORAGE
         if (needed.all { hasPerm(it) }) {
-            startLocation()
             openCamera()
         } else {
             permissionLauncher.launch(needed.toTypedArray())
@@ -258,6 +287,17 @@ class FormActivity : AppCompatActivity() {
     // ---------- camera ----------
 
     private fun openCamera() {
+        try {
+            inAppCameraLauncher.launch(Intent(this, CameraActivity::class.java)
+                .putExtra(CameraActivity.EXTRA_OUT, captureFile.absolutePath))
+        } catch (e: Exception) {
+            openSystemCamera()
+        }
+    }
+
+    /** Phone's own camera app (no live stamp). */
+    private fun openSystemCamera() {
+        if (!hasLocation) startLocation()
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.files", captureFile)
             cameraLauncher.launch(uri)
