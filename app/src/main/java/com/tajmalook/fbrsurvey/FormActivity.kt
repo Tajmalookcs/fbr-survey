@@ -605,12 +605,22 @@ class FormActivity : AppCompatActivity() {
                         inAddress.setText(addr)
                         toast("Address & map ready ✓  Tap Save to update the photo.")
                     }
-                    else -> AlertDialog.Builder(this)
-                        .setTitle("Replace address?")
-                        .setMessage("Current:\n${inAddress.text}\n\nFrom saved location:\n$addr")
-                        .setPositiveButton("Replace") { _, _ -> inAddress.setText(addr); toast("Tap Save to update the photo.") }
-                        .setNegativeButton("Keep current", null)
-                        .show()
+                    else -> {
+                        val coords = String.format(Locale.ENGLISH, "%.6f, %.6f", r.lat, r.lng)
+                        val lessDetail = Geo.detail(addr) < Geo.detail(inAddress.text.toString())
+                        AlertDialog.Builder(this)
+                            .setTitle("Replace address?")
+                            .setMessage("Current:\n${inAddress.text}\n\nFrom saved photo location ($coords):\n$addr" +
+                                if (lessDetail) "\n\nNote: this is less detailed than your current address." else "")
+                            .setPositiveButton("Replace") { _, _ -> inAddress.setText(addr); toast("Tap Save to update the photo.") }
+                            .setNegativeButton("Keep current", null)
+                            .setNeutralButton("Open in Maps") { _, _ ->
+                                try {
+                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com/?q=$coords".replace(" ", ""))))
+                                } catch (e: Exception) { toast("No maps app found") }
+                            }
+                            .show()
+                    }
                 }
             }
         }

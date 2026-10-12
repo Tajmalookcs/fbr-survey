@@ -22,53 +22,84 @@ object Geo {
     private val plusCode = Regex("^[23456789CFGHJMPQRVWX]{2,8}\\+[23456789CFGHJMPQRVWX]{0,3}$", RegexOption.IGNORE_CASE)
 
     /**
-     * Full readable address (street, area, city, district, province, country) without the
-     * Plus Code. Returns null when offline or when nothing is found. Call off the main thread.
+     * Most detailed readable address for a point (road, mohalla/area, village/town, city,
+     * district, province, country), combining Android's geocoder (several results) and
+     * OpenStreetMap's reverse geocoder. No Plus Code, no accent marks, country last.
+     * Returns null when offline or nothing is found. Call off the main thread.
      */
-    @Suppress("DEPRECATION")
     fun address(ctx: Context, lat: Double, lng: Double): String? {
-        if (!Geocoder.isPresent()) return null
-        return try {
-            val list = Geocoder(ctx, Locale.ENGLISH).getFromLocation(lat, lng, 1)
-            val a = list?.firstOrNull() ?: return null
+        val specific = mutableListOf<String>()   // road, area, mohalla, village...
+        var city: String? = null
+        var district: String? = null
+        var province: String? = null
+        var country: String? = null
 
-            // Prefer the full address line, minus any Plus Code part.
-            val line = a.getAddressLine(0)
-            val fromLine = line?.split(",")
-                ?.map { part ->
-                    // "3X49+WPM Ghausia Colony" style -> drop the Plus Code word
-                    val t = part.trim()
-                    val first = t.split(" ").first()
-                    if (plusCode.matches(first) || first.contains("+")) t.removePrefix(first).trim() else t
-                }
-                ?.filter { it.isNotEmpty() }
-
-            val parts = mutableListOf<String>()
-            fun add(s: String?) {
-                val t = s?.trim().orEmpty()
-                if (t.isEmpty() || t.contains("+")) return
-                if (parts.none { it.equals(t, ignoreCase = true) }) parts.add(t)
-            }
-
-            if (!fromLine.isNullOrEmpty()) {
-                fromLine.forEach { add(it) }
-                // Make sure district & province are present even if the line skips them.
-                if (parts.none { it.equals(a.subAdminArea, true) } && a.subAdminArea != null) {
-                    val idx = parts.indexOfFirst { it.equals(a.adminArea, true) }
-                    if (idx >= 0) parts.add(idx, a.subAdminArea) else add(a.subAdminArea)
-                }
-            } else {
-                add(listOfNotNull(a.subThoroughfare, a.thoroughfare).joinToString(" "))
-                add(a.subLocality)
-                add(a.locality)
-                add(a.subAdminArea)
-                add(a.adminArea)
-                add(a.countryName)
-            }
-            parts.joinToString(", ").ifBlank { null }
-        } catch (e: Exception) {
-            null
+        // 1) OpenStreetMap (usually knows local roads / areas better)
+        osm(lat, lng)?.let { o ->
+            listOf("road", "neighbourhood", "quarter", "residential", "hamlet", "suburb", "village")
+                .forEach { k -> o.optString(k).takeIf { it.isNotBlank() }?.let { specific += it } }
+            city = listOf("town", "city", "municipality").firstNotNullOfOrNull { k -> o.optString(k).takeIf { it.isNotBlank() } }
+            district = listOf("state_district", "county").firstNotNullOfOrNull { k -> o.optString(k).takeIf { it.isNotBlank() } }
+            province = o.optString("state").takeIf { it.isNotBlank() }
+            country = o.optString("country").takeIf { it.isNotBlank() }
         }
+
+        // 2) Android geocoder: look at up to 5 results and take every detail they offer
+        if (Geocoder.isPresent()) try {
+            @Suppress("DEPRECATION")
+            val list = Geocoder(ctx, Locale.ENGLISH).getFromLocation(lat, lng, 5).orEmpty()
+            for (a in list) {
+                listOf(a.thoroughfare, a.subLocality, a.featureName).forEach { v ->
+                    if (v != null && v.isNotBlank() && !v.contains("+") && !v.all { it.isDigit() || it == ' ' }) specific += v
+                }
+                if (city == null) city = a.locality
+                if (district == null) district = a.subAdminArea
+                if (province == null) province = a.adminArea
+                if (country == null) country = a.countryName
+            }
+        } catch (e: Exception) { }
+
+        val parts = mutableListOf<String>()
+        fun add(v: String?) {
+            val t = clean(v) ?: return
+            val low = t.lowercase(Locale.ENGLISH)
+            if (parts.any { it.lowercase(Locale.ENGLISH) == low }) return
+            parts += t
+        }
+        specific.forEach { add(it) }
+        add(city); add(district); add(province)
+        // country always last
+        clean(country)?.let { c -> parts.removeAll { it.equals(c, true) }; parts += c }
+        // drop pieces that are only the city/country (e.g. street named "Tandlianwala")
+        return parts.joinToString(", ").ifBlank { null }
+    }
+
+    /** Number of address parts, used to compare how detailed two addresses are. */
+    fun detail(address: String?): Int = address?.split(",")?.count { it.isNotBlank() } ?: 0
+
+    private fun clean(v: String?): String? {
+        if (v.isNullOrBlank()) return null
+        var t = java.text.Normalizer.normalize(v, java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("\\s+"), " ").trim()
+        t = t.replace(Regex("\\s+(District|Tehsil|Division)$", RegexOption.IGNORE_CASE), "")
+        if (t.contains("+") || t.isBlank() || t.all { it.isDigit() || it == ' ' }) return null
+        return t
+    }
+
+    private fun osm(lat: Double, lng: Double): org.json.JSONObject? = try {
+        val url = URL(String.format(Locale.ENGLISH,
+            "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=%.7f&lon=%.7f&zoom=18&addressdetails=1&accept-language=en",
+            lat, lng))
+        val conn = url.openConnection() as HttpURLConnection
+        conn.connectTimeout = 6000
+        conn.readTimeout = 8000
+        conn.setRequestProperty("User-Agent", "FBRShopSurvey/1.0 (Android field survey app)")
+        val body = conn.inputStream.bufferedReader().use { it.readText() }
+        conn.disconnect()
+        org.json.JSONObject(body).optJSONObject("address")
+    } catch (e: Exception) {
+        null
     }
 
     /**
