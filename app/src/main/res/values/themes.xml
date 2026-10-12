@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="green">#0B6E4F</color>
+    <color name="green_dark">#084C37</color>
+    <color name="red">#C62828</color>
+    <color name="bg">#F3F5F4</color>
+    <color name="text_muted">#5F6B66</color>
+
+    <style name="AppTheme" parent="Theme.MaterialComponents.Light.DarkActionBar">
+        <item name="colorPrimary">@color/green</item>
+        <item name="colorPrimaryVariant">@color/green_dark</item>
+        <item name="colorSecondary">@color/green</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:statusBarColor">@color/green_dark</item>
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+</resources>

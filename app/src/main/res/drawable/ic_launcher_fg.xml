@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- map pin -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28c-10.5,0 -19,8.5 -19,19c0,14.2 19,33 19,33s19,-18.8 19,-33c0,-10.5 -8.5,-19 -19,-19z" />
+    <!-- check mark -->
+    <path
+        android:strokeColor="#0B6E4F"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M45,47l6,6l12,-12" />
+</vector>
