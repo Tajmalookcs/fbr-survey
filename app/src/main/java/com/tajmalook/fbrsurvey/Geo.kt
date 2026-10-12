@@ -75,7 +75,13 @@ object Geo {
      * Square map thumbnail centred on the point, with a red pin.
      * Uses OpenStreetMap tiles when online; draws a plain placeholder map when offline.
      */
-    fun mapThumb(lat: Double, lng: Double, size: Int = 512, online: Boolean = true): Bitmap {
+    /** bitmap + whether it contains real map tiles (false = offline placeholder). */
+    class MapResult(val bitmap: Bitmap, val real: Boolean)
+
+    fun mapThumb(lat: Double, lng: Double, size: Int = 512, online: Boolean = true): Bitmap =
+        mapThumbResult(lat, lng, size, online).bitmap
+
+    fun mapThumbResult(lat: Double, lng: Double, size: Int = 512, online: Boolean = true): MapResult {
         val zoom = 17
         val n = 1 shl zoom
         val xf = (lng + 180.0) / 360.0 * n
@@ -116,7 +122,7 @@ object Geo {
                 drawText(label, size - w - size * 0.015f, size - size * 0.02f, p)
             }
         }
-        return scaled
+        return MapResult(scaled, gotAny)
     }
 
     private fun fetchTile(z: Int, x: Int, y: Int): Bitmap? = try {

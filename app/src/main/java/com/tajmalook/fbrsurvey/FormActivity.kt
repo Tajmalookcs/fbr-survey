@@ -72,7 +72,7 @@ class FormActivity : AppCompatActivity() {
     private var lng = 0.0
     private var accuracy = 0f
     private var autoAddress: String? = null
-    private var mapFuture: Future<Bitmap>? = null
+    private var mapFuture: Future<Geo.MapResult>? = null
     private var waitingForLocationSettings = false
 
     // ---------- launchers ----------
@@ -278,6 +278,16 @@ class FormActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(r.photoUri), "image/*")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
         }
+        if (r.address.isBlank()) io.execute {
+            val addr = Geo.address(this, r.lat, r.lng)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (addr != null && inAddress.text.isNullOrBlank()) {
+                    inAddress.setText(addr)
+                    gpsStatus.text = gpsStatus.text.toString() + "\n✓ Address found from saved location. Tap Save to update the photo."
+                }
+            }
+        }
         io.execute {
             val b = Photo.thumbFor(this, r, 900)
             runOnUiThread { if (b != null) preview.setImageBitmap(b) }
@@ -357,7 +367,7 @@ class FormActivity : AppCompatActivity() {
         }
         gpsStatus.text = String.format(Locale.ENGLISH, "📍 %.6f, %.6f (±%.0f m)  •  finding address…", lat, lng, accuracy)
 
-        mapFuture = io.submit<Bitmap> { Geo.mapThumb(lat, lng) }
+        mapFuture = io.submit<Geo.MapResult> { Geo.mapThumbResult(lat, lng) }
 
         val la = lat; val ln = lng
         io.execute {
@@ -435,33 +445,14 @@ class FormActivity : AppCompatActivity() {
             e.businessName = name; e.ownerName = owner; e.cnic = cnic; e.phone = phone
             e.address = address; e.fbrRegistered = fbr
             io.execute {
-                Store.upsert(this, e)
-                // Redraw the stamp with the new details, if the original photo is kept.
-                var restamped = false
-                var restored = false
-                val raw = Store.rawPhoto(this, e.id)
-                if (raw.exists()) try {
-                    val photo = Photo.loadUpright(raw)
-                    val mapF = Store.mapFile(this, e.id)
-                    val map = android.graphics.BitmapFactory.decodeFile(mapF.absolutePath)
-                        ?: Geo.mapThumb(e.lat, e.lng, online = false)
-                    Photo.stamp(photo, map, e)
-                    val uri = Uri.parse(e.photoUri)
-                    if (e.photoUri.isNotBlank() && Photo.galleryExists(this, uri)) {
-                        restamped = Photo.overwriteGallery(this, uri, photo)
-                    } else {
-                        // deleted from gallery: save a fresh stamped copy and remember it
-                        e.photoUri = Photo.saveToGallery(this, photo, e.photoName).toString()
-                        Store.upsert(this, e)
-                        restored = true
-                    }
-                    photo.recycle()
-                } catch (ex: Throwable) { }
+                // with internet: fill missing address / real map from the SAVED coordinates
+                val found = Restamp.fillFromSavedLocation(this, e)
+                val res = Restamp.redraw(this, e)
                 runOnUiThread {
                     progress.dismiss()
-                    toast(when {
-                        restored -> "Updated ✓  Photo restored to Gallery → ${Photo.ALBUM}"
-                        restamped -> "Updated ✓  Photo stamp updated too"
+                    toast(when (res) {
+                        Restamp.Result.RESTORED -> "Updated ✓  Photo restored to Gallery → ${Photo.ALBUM}"
+                        Restamp.Result.RESTAMPED -> if (found) "Updated ✓  Map/address filled from saved location" else "Updated ✓  Photo stamp updated too"
                         else -> "Updated ✓"
                     })
                     finish()
@@ -474,17 +465,18 @@ class FormActivity : AppCompatActivity() {
         val noCnic = cbNoCnic.isChecked
         io.execute {
             try {
-                val map = try {
-                    mapFuture?.get(15, TimeUnit.SECONDS) ?: Geo.mapThumb(la, ln, online = false)
+                val mr = try {
+                    mapFuture?.get(15, TimeUnit.SECONDS) ?: Geo.mapThumbResult(la, ln, online = false)
                 } catch (ex: Exception) {
-                    Geo.mapThumb(la, ln, online = false)
+                    Geo.mapThumbResult(la, ln, online = false)
                 }
+                val map = mr.bitmap
                 val fileName = "FBR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ENGLISH).format(Date(time)) +
                     "_" + Photo.safeFileName(name) + ".jpg"
                 val draft = Record(
                     id = time, createdAt = time,
                     surveyor = surveyor, formation = formation, area = area, market = market,
-                    cnicNotProvided = noCnic,
+                    cnicNotProvided = noCnic, mapReal = mr.real,
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
                     fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
                     photoUri = "", photoName = fileName,

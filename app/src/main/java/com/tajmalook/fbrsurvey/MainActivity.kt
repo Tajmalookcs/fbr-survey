@@ -83,6 +83,39 @@ class MainActivity : AppCompatActivity() {
         adapter.notifyDataSetChanged()
     }
 
+    // ---------- fill address / map for shops saved offline ----------
+
+    private fun updateOfflineRecords() {
+        val todo = Store.all(this).filter { it.address.isBlank() || !it.mapReal }
+        if (todo.isEmpty()) {
+            AlertDialog.Builder(this).setMessage("All shops already have an address and map.").setPositiveButton("OK", null).show()
+            return
+        }
+        @Suppress("DEPRECATION")
+        val progress = android.app.ProgressDialog(this).apply {
+            setMessage("Updating 0 / ${todo.size}…"); setCancelable(false); show()
+        }
+        io.execute {
+            var updated = 0
+            todo.forEachIndexed { i, r ->
+                runOnUiThread { progress.setMessage("Updating ${i + 1} / ${todo.size}…") }
+                if (Restamp.fillFromSavedLocation(this, r)) {
+                    Restamp.redraw(this, r)
+                    updated++
+                }
+            }
+            val left = Store.all(this).count { it.address.isBlank() || !it.mapReal }
+            runOnUiThread {
+                progress.dismiss()
+                refresh()
+                val msg = if (updated == 0) "Nothing could be updated. Check the internet connection and try again."
+                    else "Updated $updated shop(s) using their saved location.\nPhotos in the gallery were redrawn." +
+                        (if (left > 0) "\n\n$left still missing (no internet or no address found)." else "")
+                AlertDialog.Builder(this).setMessage(msg).setPositiveButton("OK", null).show()
+            }
+        }
+    }
+
     // ---------- FBR data import ----------
 
     private fun importFbrData(uri: Uri) {
@@ -109,11 +142,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
         menu.add(0, 1, 0, "About").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
         menu.add(0, 2, 1, "Import FBR data").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+        menu.add(0, 3, 2, "Update offline records").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
         return true
     }
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
         if (item.itemId == 1) { showAbout(); return true }
+        if (item.itemId == 3) { updateOfflineRecords(); return true }
         if (item.itemId == 2) {
             AlertDialog.Builder(this)
                 .setTitle("Import FBR data")

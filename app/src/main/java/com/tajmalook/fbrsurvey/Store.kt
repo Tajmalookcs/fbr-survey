@@ -25,6 +25,7 @@ data class Record(
     val photoName: String,
     var cnicNotProvided: Boolean = false,
     var boardPhone: String = "",
+    var mapReal: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -46,6 +47,7 @@ data class Record(
         put("photoName", photoName)
         put("cnicNotProvided", cnicNotProvided)
         put("boardPhone", boardPhone)
+        put("mapReal", mapReal)
     }
 
     companion object {
@@ -69,6 +71,7 @@ data class Record(
             photoName = o.optString("photoName"),
             cnicNotProvided = o.optBoolean("cnicNotProvided"),
             boardPhone = o.optString("boardPhone"),
+            mapReal = o.optBoolean("mapReal"),
         )
     }
 }
