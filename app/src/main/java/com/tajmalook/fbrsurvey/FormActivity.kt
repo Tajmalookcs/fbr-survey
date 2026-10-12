@@ -48,6 +48,9 @@ class FormActivity : AppCompatActivity() {
 
     private lateinit var preview: ImageView
     private lateinit var gpsStatus: TextView
+    private lateinit var inFormation: TextInputEditText
+    private lateinit var inArea: TextInputEditText
+    private lateinit var inMarket: TextInputEditText
     private lateinit var inName: TextInputEditText
     private lateinit var inOwner: TextInputEditText
     private lateinit var inCnic: TextInputEditText
@@ -113,6 +116,9 @@ class FormActivity : AppCompatActivity() {
 
         preview = findViewById(R.id.preview)
         gpsStatus = findViewById(R.id.gpsStatus)
+        inFormation = findViewById(R.id.inFormation)
+        inArea = findViewById(R.id.inArea)
+        inMarket = findViewById(R.id.inMarket)
         inName = findViewById(R.id.inName)
         inOwner = findViewById(R.id.inOwner)
         inCnic = findViewById(R.id.inCnic)
@@ -131,6 +137,12 @@ class FormActivity : AppCompatActivity() {
         }
 
         title = "New survey"
+        if (savedInstanceState == null) {
+            val prefs = getSharedPreferences("form", MODE_PRIVATE)
+            inFormation.setText(prefs.getString("formation", "RTO Faisalabad"))
+            inArea.setText(prefs.getString("area", ""))
+            inMarket.setText(prefs.getString("market", ""))
+        }
         findViewById<View>(R.id.btnRetake).setOnClickListener { openCamera() }
 
         if (savedInstanceState != null) {
@@ -195,6 +207,9 @@ class FormActivity : AppCompatActivity() {
         editing = r
         title = "Edit record"
         findViewById<View>(R.id.btnRetake).visibility = View.GONE
+        inFormation.setText(r.formation)
+        inArea.setText(r.area)
+        inMarket.setText(r.market)
         inName.setText(r.businessName)
         inOwner.setText(r.ownerName)
         inCnic.setText(r.cnic)
@@ -298,6 +313,9 @@ class FormActivity : AppCompatActivity() {
     // ---------- save ----------
 
     private fun save() {
+        val formation = inFormation.text?.toString()?.trim().orEmpty()
+        val area = inArea.text?.toString()?.trim().orEmpty()
+        val market = inMarket.text?.toString()?.trim().orEmpty()
         val name = inName.text?.toString()?.trim().orEmpty()
         val owner = inOwner.text?.toString()?.trim().orEmpty()
         val cnic = inCnic.text?.toString()?.trim().orEmpty()
@@ -325,22 +343,26 @@ class FormActivity : AppCompatActivity() {
                 AlertDialog.Builder(this)
                     .setTitle("Same CNIC already saved")
                     .setMessage("This CNIC is already recorded for:\n${dup.businessName}\n\nSave anyway?")
-                    .setPositiveButton("Save anyway") { _, _ -> doSave(name, owner, cnic, phone, address, fbr) }
+                    .setPositiveButton("Save anyway") { _, _ -> doSave(Triple(formation, area, market), name, owner, cnic, phone, address, fbr) }
                     .setNegativeButton("Cancel", null)
                     .show()
                 return
             }
         }
-        doSave(name, owner, cnic, phone, address, fbr)
+        doSave(Triple(formation, area, market), name, owner, cnic, phone, address, fbr)
     }
 
-    private fun doSave(name: String, owner: String, cnic: String, phone: String, address: String, fbr: Boolean) {
+    private fun doSave(place: Triple<String, String, String>, name: String, owner: String, cnic: String, phone: String, address: String, fbr: Boolean) {
+        val (formation, area, market) = place
+        getSharedPreferences("form", MODE_PRIVATE).edit()
+            .putString("formation", formation).putString("area", area).putString("market", market).apply()
         @Suppress("DEPRECATION")
         val progress = ProgressDialog(this).apply {
             setMessage("Stamping and saving photo…"); setCancelable(false); show()
         }
         val e = editing
         if (e != null) {
+            e.formation = formation; e.area = area; e.market = market
             e.businessName = name; e.ownerName = owner; e.cnic = cnic; e.phone = phone
             e.address = address; e.fbrRegistered = fbr
             io.execute {
@@ -378,6 +400,7 @@ class FormActivity : AppCompatActivity() {
                     "_" + Photo.safeFileName(name) + ".jpg"
                 val draft = Record(
                     id = time, createdAt = time,
+                    formation = formation, area = area, market = market,
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
                     fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
                     photoUri = "", photoName = fileName,

@@ -83,38 +83,80 @@ class MainActivity : AppCompatActivity() {
         if (records.isEmpty()) {
             Toast.makeText(this, "No records to export yet", Toast.LENGTH_SHORT).show(); return
         }
-        val data = records.sortedBy { it.createdAt }
+        val dayFmt = SimpleDateFormat("dd.MM.yyyy", Locale.ENGLISH)
+        val byDay = records.groupBy { dayFmt.format(Date(it.createdAt)) }
+        val days = byDay.keys.sortedByDescending { dayFmt.parse(it)?.time ?: 0L }
+        val choices = days.map { "$it  (${byDay[it]!!.size} shops)" } + "All dates  (${records.size} shops)"
+
+        val prefs = getSharedPreferences("export", MODE_PRIVATE)
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad + pad / 2, pad / 2, pad + pad / 2, 0)
+        }
+        val label1 = TextView(this).apply { text = "Report title" }
+        val titleIn = android.widget.EditText(this).apply {
+            setText(prefs.getString("title", "SURVEY REPORT SMALL TRADERS SCHEME, RTO, FAISALABAD"))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+        }
+        val label2 = TextView(this).apply { text = "Which shops?"; setPadding(0, pad, 0, 0) }
+        val spinner = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item, choices)
+        }
+        box.addView(label1); box.addView(titleIn); box.addView(label2); box.addView(spinner)
+
+        AlertDialog.Builder(this)
+            .setTitle("Export Excel")
+            .setView(box)
+            .setPositiveButton("Export") { _, _ ->
+                val title = titleIn.text.toString().trim()
+                prefs.edit().putString("title", title).apply()
+                val pos = spinner.selectedItemPosition
+                val day = days.getOrNull(pos)
+                val chosen = if (day != null) byDay[day]!! else records
+                writeExcel(title, day, chosen.sortedBy { it.createdAt })
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun writeExcel(title: String, day: String?, data: List<Record>) {
         io.execute {
             try {
-                val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.ENGLISH).format(Date())
-                val name = "FBR_Survey_$stamp.xlsx"
+                val dayFmt = SimpleDateFormat("dd.MM.yyyy", Locale.ENGLISH)
+                val place = data.firstOrNull { it.area.isNotBlank() }?.area?.split(",")?.first()?.trim().orEmpty()
+                val datePart = day ?: ("ALL_" + dayFmt.format(Date()))
+                val name = listOf("SURVEY", datePart, Photo.safeFileName(place))
+                    .filter { it.isNotBlank() }.joinToString("_") + ".xlsx"
                 val dir = File(cacheDir, "exports").apply { mkdirs() }
                 dir.listFiles()?.forEach { it.delete() }
                 val file = File(dir, name)
 
-                val dateFmt = SimpleDateFormat("dd-MM-yyyy", Locale.ENGLISH)
-                val timeFmt = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
-                val header = listOf("Sr", "Date", "Time", "Business Name", "Owner Name", "CNIC", "Phone", "Business Address",
-                    "FBR Registered", "Latitude", "Longitude", "Google Maps Link", "Photo File")
+                val header = listOf("Sr. No.", "Name of Field Formation", "Area", "Market Name", "Business Name",
+                    "Name of Shopkeeper", "Business Address", "CNIC of Person Operating Shop", "Mobile Number",
+                    "Whether Registered or No", "Dated", "Google Location")
                 val rows = data.mapIndexed { i, r ->
+                    val url = "https://maps.google.com/?q=${r.lat},${r.lng}"
                     listOf(
-                        i + 1,
-                        dateFmt.format(Date(r.createdAt)),
-                        timeFmt.format(Date(r.createdAt)),
-                        r.businessName,
-                        r.ownerName,
-                        r.cnic,
-                        r.phone,
-                        r.address,
-                        if (r.fbrRegistered) "Yes" else "No",
-                        r.lat,
-                        r.lng,
-                        "https://maps.google.com/?q=${r.lat},${r.lng}",
-                        r.photoName,
+                        Xlsx.Cell(i + 1, Xlsx.CENTER),
+                        Xlsx.Cell(r.formation, Xlsx.LEFT),
+                        Xlsx.Cell(r.area, Xlsx.LEFT),
+                        Xlsx.Cell(r.market, Xlsx.LEFT),
+                        Xlsx.Cell(r.businessName.uppercase(Locale.ENGLISH), Xlsx.LEFT),
+                        Xlsx.Cell(r.ownerName.uppercase(Locale.ENGLISH), Xlsx.LEFT),
+                        Xlsx.Cell(r.address, Xlsx.LEFT),
+                        Xlsx.Cell(r.cnic.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
+                        Xlsx.Cell(r.phone.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
+                        Xlsx.Cell(if (r.fbrRegistered) "Yes" else "No", Xlsx.CENTER),
+                        Xlsx.Cell(dayFmt.format(Date(r.createdAt)), Xlsx.CENTER),
+                        Xlsx.Cell("View on Map", Xlsx.LINK, url),
                     )
                 }
-                val widths = listOf(5, 12, 10, 28, 24, 17, 14, 45, 15, 12, 12, 42, 40)
-                file.outputStream().use { Xlsx.write(it, "Survey", header, rows, widths) }
+                val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 16.0)
+                file.outputStream().use {
+                    Xlsx.writeReport(it, day ?: "Survey", title, header, rows, widths)
+                }
 
                 val savedTo = try { copyToDownloads(file) } catch (e: Exception) { null }
 

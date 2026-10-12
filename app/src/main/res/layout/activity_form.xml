@@ -51,6 +51,45 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
+                android:hint="Name of field formation">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/inFormation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textCapWords" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:hint="Area (e.g. Mamokanjan, Tandlianwala)">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/inArea"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textCapWords" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:hint="Market name">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/inMarket"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="textCapWords" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.textfield.TextInputLayout
+                style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
                 android:hint="Business name *">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/inName"
@@ -64,7 +103,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:hint="Owner name">
+                android:hint="Name of shopkeeper">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/inOwner"
                     android:layout_width="match_parent"
@@ -92,7 +131,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
-                android:hint="Phone number (03xxxxxxxxx)">
+                android:hint="Mobile number (03xxxxxxxxx)">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/inPhone"
                     android:layout_width="match_parent"

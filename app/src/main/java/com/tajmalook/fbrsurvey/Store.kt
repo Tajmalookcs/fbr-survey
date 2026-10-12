@@ -8,6 +8,9 @@ import java.io.File
 data class Record(
     val id: Long,
     val createdAt: Long,
+    var formation: String,
+    var area: String,
+    var market: String,
     var businessName: String,
     var ownerName: String,
     var cnic: String,
@@ -23,6 +26,9 @@ data class Record(
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("createdAt", createdAt)
+        put("formation", formation)
+        put("area", area)
+        put("market", market)
         put("businessName", businessName)
         put("ownerName", ownerName)
         put("cnic", cnic)
@@ -40,6 +46,9 @@ data class Record(
         fun fromJson(o: JSONObject) = Record(
             id = o.getLong("id"),
             createdAt = o.getLong("createdAt"),
+            formation = o.optString("formation"),
+            area = o.optString("area"),
+            market = o.optString("market"),
             businessName = o.optString("businessName"),
             ownerName = o.optString("ownerName"),
             cnic = o.optString("cnic"),
