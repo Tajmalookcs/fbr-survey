@@ -278,6 +278,10 @@ class FormActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(r.photoUri), "image/*")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
         }
+        findViewById<MaterialButton>(R.id.btnGetAddress).apply {
+            visibility = View.VISIBLE
+            setOnClickListener { getFromSavedLocation(r) }
+        }
         if (r.address.isBlank()) io.execute {
             val addr = Geo.address(this, r.lat, r.lng)
             runOnUiThread {
@@ -574,6 +578,41 @@ class FormActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")))
         } catch (e: Exception) {
             toast("No browser found")
+        }
+    }
+
+    /** Looks up address + real map for the record's SAVED coordinates (edit screen button). */
+    private fun getFromSavedLocation(r: Record) {
+        @Suppress("DEPRECATION")
+        val progress = ProgressDialog(this).apply {
+            setMessage("Getting address & map for saved location…"); setCancelable(false); show()
+        }
+        io.execute {
+            val addr = Geo.address(this, r.lat, r.lng)
+            val m = Geo.mapThumbResult(r.lat, r.lng)
+            if (m.real) {
+                Store.mapFile(this, r.id).outputStream().use { m.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                r.mapReal = true
+                editing?.mapReal = true
+            }
+            runOnUiThread {
+                progress.dismiss()
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                when {
+                    addr == null && !m.real -> toast("No internet. Try again when connected.")
+                    addr == null -> toast("Map updated ✓  No address found. Type it manually, then tap Save.")
+                    inAddress.text.isNullOrBlank() || inAddress.text.toString() == addr -> {
+                        inAddress.setText(addr)
+                        toast("Address & map ready ✓  Tap Save to update the photo.")
+                    }
+                    else -> AlertDialog.Builder(this)
+                        .setTitle("Replace address?")
+                        .setMessage("Current:\n${inAddress.text}\n\nFrom saved location:\n$addr")
+                        .setPositiveButton("Replace") { _, _ -> inAddress.setText(addr); toast("Tap Save to update the photo.") }
+                        .setNegativeButton("Keep current", null)
+                        .show()
+                }
+            }
         }
     }
 

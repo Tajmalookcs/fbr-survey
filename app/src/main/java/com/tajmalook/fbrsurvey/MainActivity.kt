@@ -116,6 +116,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun updateOne(r: Record) {
+        @Suppress("DEPRECATION")
+        val progress = android.app.ProgressDialog(this).apply {
+            setMessage("Updating from saved location…"); setCancelable(false); show()
+        }
+        io.execute {
+            val found = Restamp.fillFromSavedLocation(this, r)
+            if (found) Restamp.redraw(this, r)
+            runOnUiThread {
+                progress.dismiss()
+                refresh()
+                Toast.makeText(this,
+                    if (found) "Updated ✓  ${r.businessName}" else "No internet or no address found. Try again later.",
+                    Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     // ---------- FBR data import ----------
 
     private fun importFbrData(uri: Uri) {
@@ -352,6 +370,10 @@ class MainActivity : AppCompatActivity() {
                 cornerRadius = 40f
                 setColor(ContextCompat.getColor(this@MainActivity, if (r.fbrRegistered) R.color.green else R.color.red))
             }
+
+            val upd = v.findViewById<View>(R.id.btnRowUpdate)
+            upd.visibility = if (r.address.isBlank() || !r.mapReal) View.VISIBLE else View.GONE
+            upd.setOnClickListener { updateOne(r) }
 
             val img = v.findViewById<ImageView>(R.id.thumb)
             img.tag = r.photoUri
