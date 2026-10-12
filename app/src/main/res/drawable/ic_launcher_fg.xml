@@ -1,19 +1,59 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- map pin -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,28c-10.5,0 -19,8.5 -19,19c0,14.2 19,33 19,33s19,-18.8 19,-33c0,-10.5 -8.5,-19 -19,-19z" />
-    <!-- check mark -->
-    <path
-        android:strokeColor="#0B6E4F"
-        android:strokeWidth="5"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:fillColor="#00000000"
-        android:pathData="M45,47l6,6l12,-12" />
+
+    <group
+        android:scaleX="0.42"
+        android:scaleY="0.42"
+        android:translateX="17.04"
+        android:translateY="26.49">
+
+        <!-- purple shape -->
+        <path android:pathData="M66,55 C80,58 95,63 108,56 C121,49 126,25 143,24 C156,23 160,40 159,62 C158,90 145,107 128,107 C108,107 92,90 77,70 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="66" android:startY="0"
+                    android:endX="160" android:endY="0">
+                    <item android:offset="0" android:color="#FF4A2380" />
+                    <item android:offset="0.3" android:color="#FF6A35B5" />
+                    <item android:offset="1" android:color="#FF7E44DE" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- green shape -->
+        <path android:pathData="M77,68 C67,53 54,42 42,42 C25,42 16,58 17,78 C18,98 26,108 37,106 C50,104 62,90 77,70 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="17" android:startY="0"
+                    android:endX="78" android:endY="0">
+                    <item android:offset="0" android:color="#FF22A37A" />
+                    <item android:offset="0.6" android:color="#FF1E9470" />
+                    <item android:offset="1" android:color="#FF0C3F31" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- dots -->
+        <path android:fillColor="#FF7340C4"
+            android:pathData="M90,42 A7,7 0 1 0 104,42 A7,7 0 1 0 90,42 Z" />
+        <path android:fillColor="#FF20A076"
+            android:pathData="M74,84 H77 A4,4 0 0 1 81,88 V91 A4,4 0 0 1 77,95 H74 A4,4 0 0 1 70,91 V88 A4,4 0 0 1 74,84 Z" />
+    </group>
+
+    <!-- red map pin in the center -->
+    <path android:fillColor="#4D000000"
+        android:pathData="M51.4,60 A2.6,0.9 0 1 0 56.6,60 A2.6,0.9 0 1 0 51.4,60 Z" />
+    <path android:fillColor="#FFEA4335"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="0.9"
+        android:pathData="M54,60 C52.1,56.8 48,53.2 48,49.2 A6,6 0 0 1 60,49.2 C60,53.2 55.9,56.8 54,60 Z" />
+    <path android:fillColor="#FFA52714"
+        android:pathData="M51.8,49.2 A2.2,2.2 0 1 0 56.2,49.2 A2.2,2.2 0 1 0 51.8,49.2 Z" />
 </vector>
