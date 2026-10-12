@@ -67,9 +67,11 @@ object Photo {
     }
 
     /**
-     * Draws the bottom stamp like the reference: map thumbnail on the left,
-     * address + coordinates (white) and date/time (yellow) on the right,
-     * over a semi-transparent black strip.
+     * Draws the stamp like the reference:
+     *  - one white box with the survey details (business, owner, CNIC, phone, FBR status),
+     *    placed just above the strip;
+     *  - a semi-transparent black strip with the map thumbnail on the left and
+     *    Plus Code + address, coordinates and date/time (yellow on black) on the right.
      */
     fun stamp(photo: Bitmap, map: Bitmap, r: Record): Bitmap {
         val w = photo.width
@@ -80,41 +82,70 @@ object Photo {
         val textLeft = pad * 2 + mapSize
         val textWidth = (w - textLeft - pad).toInt()
 
+        // ---- bottom strip text
         val big = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = unit * 0.040f
+            textSize = unit * 0.042f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
             setShadowLayer(unit * 0.003f, 0f, 0f, Color.BLACK)
         }
-        val title = TextPaint(big).apply { textSize = unit * 0.046f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD) }
-        val mid = TextPaint(big).apply { textSize = unit * 0.035f }
-        val small = TextPaint(big).apply { textSize = unit * 0.030f; color = Color.rgb(225, 225, 225) }
+        val small = TextPaint(big).apply { textSize = unit * 0.031f; color = Color.rgb(225, 225, 225) }
         val yellow = TextPaint(big).apply { color = Color.rgb(255, 214, 0) }
-        val status = TextPaint(title).apply {
-            textSize = unit * 0.038f
-            color = if (r.fbrRegistered) Color.rgb(80, 220, 110) else Color.rgb(255, 90, 90)
-        }
 
+        val plus = PlusCode.encode(r.lat, r.lng)
+        val addressLine = if (r.address.isNotBlank()) "${plus.substring(4)}, ${r.address}" else plus
         val lines = mutableListOf<StaticLayout>()
-        if (r.businessName.isNotBlank()) lines += layout("Business: ${r.businessName}", title, textWidth, 2)
-        val ownerLine = listOfNotNull(
-            r.ownerName.takeIf { it.isNotBlank() }?.let { "Owner: $it" },
-            r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
-        ).joinToString("   |   ")
-        if (ownerLine.isNotEmpty()) lines += layout(ownerLine, mid, textWidth, 2)
-        if (r.phone.isNotBlank()) lines += layout("Phone: ${r.phone}", mid, textWidth, 1)
-        lines += layout(if (r.fbrRegistered) "FBR Registered: YES" else "FBR Registered: NO", status, textWidth, 1)
-        if (r.address.isNotBlank()) lines += layout(r.address, big, textWidth, 3)
-        lines += layout(String.format(Locale.ENGLISH, "Lat %.6f°  Long %.6f°", r.lat, r.lng), small, textWidth, 1)
-        val dateLayout = layout(stampDate(r.createdAt), yellow, textWidth, 1)
+        lines += layout(addressLine, big, textWidth, 3, center = true)
+        lines += layout(String.format(Locale.ENGLISH, "Lat %.6f°  Long %.6f°", r.lat, r.lng), small, textWidth, 1, center = true)
+        val dateLayout = layout(stampDate(r.createdAt), yellow, textWidth, 1, center = true)
         lines += dateLayout
 
-        val gap = unit * 0.012f
+        val gap = unit * 0.014f
         val textHeight = lines.sumOf { it.height } + gap * (lines.size - 1)
         val stripH = max(mapSize + pad * 2, textHeight + pad * 2)
         val stripTop = h - stripH
 
+        // ---- white box text
+        val dark = Color.rgb(25, 25, 25)
+        val boxTitle = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = dark
+            textSize = unit * 0.044f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val boxText = TextPaint(boxTitle).apply { textSize = unit * 0.036f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL) }
+        val boxStatus = TextPaint(boxTitle).apply {
+            textSize = unit * 0.040f
+            color = if (r.fbrRegistered) Color.rgb(20, 140, 60) else Color.rgb(200, 30, 30)
+        }
+        val boxX = pad
+        val boxW = w - pad * 2
+        val inner = unit * 0.025f
+        val boxTextW = (boxW - inner * 2).toInt()
+        val boxLines = mutableListOf<StaticLayout>()
+        if (r.businessName.isNotBlank()) boxLines += layout("Business: ${r.businessName}", boxTitle, boxTextW, 2)
+        if (r.ownerName.isNotBlank()) boxLines += layout("Owner: ${r.ownerName}", boxText, boxTextW, 2)
+        val idLine = listOfNotNull(
+            r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
+            r.phone.takeIf { it.isNotBlank() }?.let { "Phone: $it" },
+        ).joinToString("     ")
+        if (idLine.isNotEmpty()) boxLines += layout(idLine, boxText, boxTextW, 2)
+        boxLines += layout(if (r.fbrRegistered) "FBR Registered: YES" else "FBR Registered: NO", boxStatus, boxTextW, 1)
+        val boxGap = unit * 0.006f
+        val boxH = boxLines.sumOf { it.height } + boxGap * (boxLines.size - 1) + inner * 2
+        val boxTop = stripTop - unit * 0.02f - boxH
+
         val c = Canvas(photo)
+
+        // white box
+        c.drawRoundRect(boxX, boxTop, boxX + boxW, boxTop + boxH, unit * 0.02f, unit * 0.02f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(240, 255, 255, 255) })
+        var by = boxTop + inner
+        for (l in boxLines) {
+            c.save(); c.translate(boxX + inner, by); l.draw(c); c.restore()
+            by += l.height + boxGap
+        }
+
+        // black strip
         c.drawRect(0f, stripTop, w.toFloat(), h.toFloat(), Paint().apply { color = Color.argb(165, 0, 0, 0) })
 
         // map thumbnail with white border
@@ -132,8 +163,8 @@ object Photo {
             if (l === dateLayout) {
                 // solid black box behind the date & time
                 val bx = unit * 0.018f
-                val by = unit * 0.006f
-                c.drawRoundRect(l.getLineLeft(0) - bx, -by, l.getLineRight(0) + bx, l.height + by,
+                val byy = unit * 0.006f
+                c.drawRoundRect(l.getLineLeft(0) - bx, -byy, l.getLineRight(0) + bx, l.height + byy,
                     unit * 0.008f, unit * 0.008f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK })
             }
             l.draw(c)
@@ -143,9 +174,9 @@ object Photo {
         return photo
     }
 
-    private fun layout(text: String, paint: TextPaint, width: Int, maxLines: Int): StaticLayout =
+    private fun layout(text: String, paint: TextPaint, width: Int, maxLines: Int, center: Boolean = false): StaticLayout =
         StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
-            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setAlignment(if (center) Layout.Alignment.ALIGN_CENTER else Layout.Alignment.ALIGN_NORMAL)
             .setMaxLines(maxLines)
             .setEllipsize(android.text.TextUtils.TruncateAt.END)
             .setIncludePad(false)
