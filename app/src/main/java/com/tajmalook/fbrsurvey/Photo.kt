@@ -96,7 +96,7 @@ object Photo {
         }
 
         val lines = mutableListOf<StaticLayout>()
-        if (r.businessName.isNotBlank()) lines += layout(r.businessName, title, textWidth, 2)
+        if (r.businessName.isNotBlank()) lines += layout("Business: ${r.businessName}", title, textWidth, 2)
         val ownerLine = listOfNotNull(
             r.ownerName.takeIf { it.isNotBlank() }?.let { "Owner: $it" },
             r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
@@ -106,7 +106,8 @@ object Photo {
         lines += layout(if (r.fbrRegistered) "FBR Registered: YES" else "FBR Registered: NO", status, textWidth, 1)
         if (r.address.isNotBlank()) lines += layout(r.address, big, textWidth, 3)
         lines += layout(String.format(Locale.ENGLISH, "Lat %.6f°  Long %.6f°", r.lat, r.lng), small, textWidth, 1)
-        lines += layout(stampDate(r.createdAt), yellow, textWidth, 1)
+        val dateLayout = layout(stampDate(r.createdAt), yellow, textWidth, 1)
+        lines += dateLayout
 
         val gap = unit * 0.012f
         val textHeight = lines.sumOf { it.height } + gap * (lines.size - 1)
@@ -128,6 +129,13 @@ object Photo {
         for (l in lines) {
             c.save()
             c.translate(textLeft, y)
+            if (l === dateLayout) {
+                // solid black box behind the date & time
+                val bx = unit * 0.018f
+                val by = unit * 0.006f
+                c.drawRoundRect(l.getLineLeft(0) - bx, -by, l.getLineRight(0) + bx, l.height + by,
+                    unit * 0.008f, unit * 0.008f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK })
+            }
             l.draw(c)
             c.restore()
             y += l.height + gap
