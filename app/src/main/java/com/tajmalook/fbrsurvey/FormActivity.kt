@@ -282,14 +282,13 @@ class FormActivity : AppCompatActivity() {
             visibility = View.VISIBLE
             setOnClickListener { getFromSavedLocation(r) }
         }
-        if (r.address.isBlank()) io.execute {
+        if (r.address.isBlank() || r.mapAddress.isBlank()) io.execute {
             val addr = Geo.address(this, r.lat, r.lng)
             runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                if (addr != null && inAddress.text.isNullOrBlank()) {
-                    inAddress.setText(addr)
-                    gpsStatus.text = gpsStatus.text.toString() + "\n✓ Address found from saved location. Tap Save to update the photo."
-                }
+                if (isFinishing || isDestroyed || addr == null) return@runOnUiThread
+                if (r.mapAddress.isBlank()) r.mapAddress = addr      // photo stamp address
+                if (inAddress.text.isNullOrBlank()) inAddress.setText(addr)
+                gpsStatus.text = gpsStatus.text.toString() + "\n✓ Address found from saved location. Tap Save to update the photo."
             }
         }
         io.execute {
@@ -467,6 +466,7 @@ class FormActivity : AppCompatActivity() {
 
         val la = lat; val ln = lng; val acc = accuracy; val time = captureTime
         val noCnic = cbNoCnic.isChecked
+        val stampAddr = autoAddress.orEmpty()   // real address from GPS, not the edited field
         io.execute {
             try {
                 val mr = try {
@@ -480,7 +480,7 @@ class FormActivity : AppCompatActivity() {
                 val draft = Record(
                     id = time, createdAt = time,
                     surveyor = surveyor, formation = formation, area = area, market = market,
-                    cnicNotProvided = noCnic, mapReal = mr.real,
+                    cnicNotProvided = noCnic, mapReal = mr.real, mapAddress = stampAddr,
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
                     fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
                     photoUri = "", photoName = fileName,
@@ -595,6 +595,7 @@ class FormActivity : AppCompatActivity() {
                 r.mapReal = true
                 editing?.mapReal = true
             }
+            if (addr != null) r.mapAddress = addr   // photo stamp always uses the real map address
             runOnUiThread {
                 progress.dismiss()
                 if (isFinishing || isDestroyed) return@runOnUiThread

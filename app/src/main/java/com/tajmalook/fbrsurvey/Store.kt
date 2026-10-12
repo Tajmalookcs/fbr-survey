@@ -26,6 +26,8 @@ data class Record(
     var cnicNotProvided: Boolean = false,
     var boardPhone: String = "",
     var mapReal: Boolean = false,
+    /** Address found from GPS (used ONLY on the photo stamp). `address` is the form/Excel address. */
+    var mapAddress: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -48,6 +50,7 @@ data class Record(
         put("cnicNotProvided", cnicNotProvided)
         put("boardPhone", boardPhone)
         put("mapReal", mapReal)
+        put("mapAddress", mapAddress)
     }
 
     companion object {
@@ -72,6 +75,8 @@ data class Record(
             cnicNotProvided = o.optBoolean("cnicNotProvided"),
             boardPhone = o.optString("boardPhone"),
             mapReal = o.optBoolean("mapReal"),
+            // older records: fall back to the form address once
+            mapAddress = if (o.has("mapAddress")) o.optString("mapAddress") else o.optString("address"),
         )
     }
 }

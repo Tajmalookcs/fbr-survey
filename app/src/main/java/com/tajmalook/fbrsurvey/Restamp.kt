@@ -17,8 +17,12 @@ object Restamp {
      */
     fun fillFromSavedLocation(ctx: Context, r: Record): Boolean {
         var changed = false
-        if (r.address.isBlank()) {
-            Geo.address(ctx, r.lat, r.lng)?.let { r.address = it; changed = true }
+        if (r.mapAddress.isBlank()) {
+            Geo.address(ctx, r.lat, r.lng)?.let {
+                r.mapAddress = it                       // stamp address (real, from GPS)
+                if (r.address.isBlank()) r.address = it // form/Excel address only if empty
+                changed = true
+            }
         }
         if (!r.mapReal) {
             val m = Geo.mapThumbResult(r.lat, r.lng)

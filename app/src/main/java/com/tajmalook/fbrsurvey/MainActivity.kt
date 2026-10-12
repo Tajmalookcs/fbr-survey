@@ -86,7 +86,7 @@ class MainActivity : AppCompatActivity() {
     // ---------- fill address / map for shops saved offline ----------
 
     private fun updateOfflineRecords() {
-        val todo = Store.all(this).filter { it.address.isBlank() || !it.mapReal }
+        val todo = Store.all(this).filter { it.mapAddress.isBlank() || !it.mapReal }
         if (todo.isEmpty()) {
             AlertDialog.Builder(this).setMessage("All shops already have an address and map.").setPositiveButton("OK", null).show()
             return
@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
                     updated++
                 }
             }
-            val left = Store.all(this).count { it.address.isBlank() || !it.mapReal }
+            val left = Store.all(this).count { it.mapAddress.isBlank() || !it.mapReal }
             runOnUiThread {
                 progress.dismiss()
                 refresh()
@@ -372,7 +372,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val upd = v.findViewById<View>(R.id.btnRowUpdate)
-            upd.visibility = if (r.address.isBlank() || !r.mapReal) View.VISIBLE else View.GONE
+            upd.visibility = if (r.mapAddress.isBlank() || !r.mapReal) View.VISIBLE else View.GONE
             upd.setOnClickListener { updateOne(r) }
 
             val img = v.findViewById<ImageView>(R.id.thumb)
