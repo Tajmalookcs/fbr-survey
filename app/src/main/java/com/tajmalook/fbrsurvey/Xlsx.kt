@@ -6,7 +6,7 @@ import java.util.zip.ZipOutputStream
 
 /**
  * Writes the survey report in the same layout as the office form:
- * merged title row, bold header row, an empty row, then data rows,
+ * merged title row, "Survey Conducted by" row, bold header row, an empty row, then data rows,
  * Times New Roman 12 with thin borders, plus a clickable Google Maps link column.
  */
 object Xlsx {
@@ -21,11 +21,13 @@ object Xlsx {
     const val TEXT_CENTER = 5
     const val LINK = 6
     const val BLANK = 7
+    const val SUBTITLE = 8
 
     fun writeReport(
         out: OutputStream,
         sheetName: String,
         title: String,
+        subtitle: String,
         header: List<String>,
         rows: List<List<Cell>>,
         widths: List<Double>,
@@ -36,7 +38,7 @@ object Xlsx {
         val sb = StringBuilder()
         sb.append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<sheetViews><sheetView workbookViewId="0"><pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<sheetViews><sheetView workbookViewId="0"><pane ySplit="3" topLeftCell="A4" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
 <sheetFormatPr defaultRowHeight="15.75"/>
 <cols>""")
         widths.forEachIndexed { i, wd -> sb.append("""<col min="${i + 1}" max="${i + 1}" width="$wd" customWidth="1"/>""") }
@@ -47,15 +49,19 @@ object Xlsx {
         sb.append(cellXml("A1", title, TITLE))
         for (i in 1 until header.size) sb.append("""<c r="${col(i)}1" s="$TITLE"/>""")
         sb.append("</row>")
-        sb.append("""<row r="2" ht="47.25" customHeight="1">""")
-        header.forEachIndexed { i, h -> sb.append(cellXml("${col(i)}2", h, HEADER)) }
+        sb.append("""<row r="2" ht="24" customHeight="1">""")
+        sb.append(cellXml("A2", subtitle, SUBTITLE))
+        for (i in 1 until header.size) sb.append("""<c r="${col(i)}2" s="$SUBTITLE"/>""")
         sb.append("</row>")
-        sb.append("""<row r="3">""")
-        for (i in header.indices) sb.append("""<c r="${col(i)}3" s="$BLANK"/>""")
+        sb.append("""<row r="3" ht="47.25" customHeight="1">""")
+        header.forEachIndexed { i, h -> sb.append(cellXml("${col(i)}3", h, HEADER)) }
+        sb.append("</row>")
+        sb.append("""<row r="4">""")
+        for (i in header.indices) sb.append("""<c r="${col(i)}4" s="$BLANK"/>""")
         sb.append("</row>")
 
         rows.forEachIndexed { ri, r ->
-            val rowNum = ri + 4
+            val rowNum = ri + 5
             sb.append("""<row r="$rowNum">""")
             r.forEachIndexed { i, c ->
                 val ref = "${col(i)}$rowNum"
@@ -65,7 +71,7 @@ object Xlsx {
             sb.append("</row>")
         }
         sb.append("</sheetData>")
-        sb.append("""<mergeCells count="1"><mergeCell ref="A1:${lastCol}1"/></mergeCells>""")
+        sb.append("""<mergeCells count="2"><mergeCell ref="A1:${lastCol}1"/><mergeCell ref="A2:${lastCol}2"/></mergeCells>""")
         if (links.isNotEmpty()) {
             sb.append("<hyperlinks>")
             links.forEachIndexed { i, (ref, _) -> sb.append("""<hyperlink ref="$ref" r:id="rId${i + 1}"/>""") }
@@ -96,7 +102,7 @@ object Xlsx {
             put("xl/workbook.xml", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
 <sheets><sheet name="${esc(sheetName.take(31))}" sheetId="1" r:id="rId1"/></sheets>
-<definedNames><definedName name="_xlnm.Print_Titles" localSheetId="0">'${esc(sheetName.take(31))}'!${'$'}1:${'$'}2</definedName></definedNames>
+<definedNames><definedName name="_xlnm.Print_Titles" localSheetId="0">'${esc(sheetName.take(31))}'!${'$'}1:${'$'}3</definedName></definedNames>
 </workbook>""")
             put("xl/_rels/workbook.xml.rels", """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
@@ -152,7 +158,7 @@ object Xlsx {
 <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>
 <borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>$B</borders>
 <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-<cellXfs count="8">
+<cellXfs count="9">
 <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
 <xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
 <xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
@@ -161,6 +167,7 @@ object Xlsx {
 <xf numFmtId="49" fontId="2" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>
 <xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>
 <xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>
+<xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>"""

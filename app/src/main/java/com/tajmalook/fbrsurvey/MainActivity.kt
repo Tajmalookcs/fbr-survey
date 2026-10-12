@@ -155,7 +155,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 42.0)
                 file.outputStream().use {
-                    Xlsx.writeReport(it, day ?: "Survey", title, header, rows, widths)
+                    val names = data.map { it.surveyor.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(", ")
+                    Xlsx.writeReport(it, day ?: "Survey", title, "Survey Conducted by: $names", header, rows, widths)
                 }
 
                 val savedTo = try { copyToDownloads(file) } catch (e: Exception) { null }
