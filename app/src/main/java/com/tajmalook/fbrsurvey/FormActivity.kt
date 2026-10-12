@@ -130,6 +130,7 @@ class FormActivity : AppCompatActivity() {
         inCnic.addTextChangedListener(CnicFormatter(inCnic))
 
         findViewById<MaterialButton>(R.id.btnSave).setOnClickListener { save() }
+        findViewById<MaterialButton>(R.id.btnCheck).setOnClickListener { checkOnFbr() }
         gpsStatus.setOnClickListener { if (!hasLocation && editing == null) startLocation() }
 
         val id = intent.getLongExtra(EXTRA_ID, -1L)
@@ -433,6 +434,24 @@ class FormActivity : AppCompatActivity() {
                     toast("Save failed: ${ex.message}")
                 }
             }
+        }
+    }
+
+    /** Copies the CNIC (digits only) and opens FBR IRIS in the browser. */
+    private fun checkOnFbr() {
+        val digits = inCnic.text?.toString().orEmpty().filter { it.isDigit() }
+        if (digits.length != 13) {
+            inCnic.error = "Enter full 13-digit CNIC first"
+            inCnic.requestFocus()
+            return
+        }
+        val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("CNIC", digits))
+        Toast.makeText(this, "CNIC $digits copied. Paste it on the FBR page.", Toast.LENGTH_LONG).show()
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://iris.fbr.gov.pk")))
+        } catch (e: Exception) {
+            toast("No browser found")
         }
     }
 
