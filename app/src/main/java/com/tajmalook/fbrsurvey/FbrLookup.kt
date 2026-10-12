@@ -19,13 +19,11 @@ import java.util.Arrays
  */
 object FbrLookup {
 
-    private const val MAGIC = "FBRLKP2\n"
+    private const val MAGIC = "FBRLKP3\n"
     private const val HEADER = 24
     private val ID_SALT = "fbr-survey-id-v1|".toByteArray()
-    private val KEY_A = "fbr-survey-name-a|".toByteArray()
-    private val KEY_B = "fbr-survey-name-b|".toByteArray()
 
-    class Result(val found: Boolean, val name: String)
+    class Result(val found: Boolean, val name: String, val business: String = "")
     class Info(val count: Long, val createdSec: Long)
 
     private var hashes: LongArray? = null
@@ -44,7 +42,7 @@ object FbrLookup {
     private fun readHeader(input: DataInputStream): Info {
         val magic = ByteArray(8)
         input.readFully(magic)
-        require(String(magic, Charsets.US_ASCII) == MAGIC) { "Not an FBR lookup file" }
+        require(String(magic, Charsets.US_ASCII) == MAGIC) { "Not an FBR lookup file (or made with an old script version)" }
         val count = input.readLong()
         val created = input.readLong()
         require(count in 1..50_000_000) { "Bad record count" }
@@ -94,9 +92,12 @@ object FbrLookup {
                 val len = raf.readUnsignedByte()
                 val enc = ByteArray(len)
                 raf.readFully(enc)
-                val ks = sha256(KEY_A, c) + sha256(KEY_B, c)
+                val ks = (0 until 4).fold(ByteArray(0)) { acc, i ->
+                    acc + sha256("fbr-survey-name-${'a' + i}|".toByteArray(), c)
+                }
                 for (i in 0 until len) enc[i] = (enc[i].toInt() xor ks[i].toInt()).toByte()
-                Result(true, String(enc, Charsets.UTF_8).trim())
+                val parts = String(enc, Charsets.UTF_8).split("\n", limit = 2)
+                Result(true, parts[0].trim(), parts.getOrElse(1) { "" }.trim())
             }
         } catch (e: Exception) {
             Result(true, "")

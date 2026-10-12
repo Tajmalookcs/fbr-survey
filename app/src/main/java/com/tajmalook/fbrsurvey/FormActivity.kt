@@ -490,11 +490,14 @@ class FormActivity : AppCompatActivity() {
                         fbrStatus.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
                     }
                     res.found -> {
-                        fbrStatus.text = if (res.name.isNotBlank()) "✓ Registered: ${res.name}" else "✓ Registered (found in FBR data)"
+                        val who = listOf(res.name, res.business).filter { it.isNotBlank() }.joinToString("  •  ")
+                        fbrStatus.text = if (who.isNotBlank()) "✓ Registered: $who" else "✓ Registered (found in FBR data)"
                         fbrStatus.setTextColor(ContextCompat.getColor(this, R.color.green))
                         if (auto) {
                             rgFbr.check(R.id.rbYes)
                             if (res.name.isNotBlank() && inOwner.text.isNullOrBlank()) inOwner.setText(res.name)
+                            // business name only if FBR has one; otherwise the field stays empty
+                            if (res.business.isNotBlank() && inName.text.isNullOrBlank()) inName.setText(res.business)
                         }
                     }
                     else -> {
