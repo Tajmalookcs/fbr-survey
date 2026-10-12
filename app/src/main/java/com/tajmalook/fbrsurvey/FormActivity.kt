@@ -113,6 +113,7 @@ class FormActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_form)
+        keepAboveSystemBars()
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
 
         preview = findViewById(R.id.preview)
@@ -131,6 +132,13 @@ class FormActivity : AppCompatActivity() {
 
         findViewById<MaterialButton>(R.id.btnSave).setOnClickListener { save() }
         findViewById<MaterialButton>(R.id.btnCheck).setOnClickListener { checkOnFbr() }
+        findViewById<MaterialButton>(R.id.btnCopyPhone).setOnClickListener {
+            val phone = inPhone.text?.toString().orEmpty().filter { it.isDigit() || it == '+' }
+            if (phone.isEmpty()) { inPhone.error = "Enter mobile number first"; return@setOnClickListener }
+            val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("Mobile", phone))
+            Toast.makeText(this, "Mobile $phone copied", Toast.LENGTH_SHORT).show()
+        }
         gpsStatus.setOnClickListener { if (!hasLocation && editing == null) startLocation() }
 
         val id = intent.getLongExtra(EXTRA_ID, -1L)
