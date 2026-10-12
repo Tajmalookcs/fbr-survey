@@ -71,7 +71,7 @@ object Photo {
      * address + coordinates (white) and date/time (yellow) on the right,
      * over a semi-transparent black strip.
      */
-    fun stamp(photo: Bitmap, map: Bitmap, address: String?, lat: Double, lng: Double, time: Long): Bitmap {
+    fun stamp(photo: Bitmap, map: Bitmap, r: Record): Bitmap {
         val w = photo.width
         val h = photo.height
         val unit = min(w, h).toFloat()
@@ -82,18 +82,31 @@ object Photo {
 
         val big = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = unit * 0.042f
+            textSize = unit * 0.040f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
             setShadowLayer(unit * 0.003f, 0f, 0f, Color.BLACK)
         }
-        val small = TextPaint(big).apply { textSize = unit * 0.032f; color = Color.rgb(230, 230, 230) }
+        val title = TextPaint(big).apply { textSize = unit * 0.046f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD) }
+        val mid = TextPaint(big).apply { textSize = unit * 0.035f }
+        val small = TextPaint(big).apply { textSize = unit * 0.030f; color = Color.rgb(225, 225, 225) }
         val yellow = TextPaint(big).apply { color = Color.rgb(255, 214, 0) }
+        val status = TextPaint(title).apply {
+            textSize = unit * 0.038f
+            color = if (r.fbrRegistered) Color.rgb(80, 220, 110) else Color.rgb(255, 90, 90)
+        }
 
-        val coords = String.format(Locale.ENGLISH, "Lat %.6f°  Long %.6f°", lat, lng)
         val lines = mutableListOf<StaticLayout>()
-        if (!address.isNullOrBlank()) lines += layout(address, big, textWidth, 3)
-        lines += layout(coords, small, textWidth, 1)
-        lines += layout(stampDate(time), yellow, textWidth, 1)
+        if (r.businessName.isNotBlank()) lines += layout(r.businessName, title, textWidth, 2)
+        val ownerLine = listOfNotNull(
+            r.ownerName.takeIf { it.isNotBlank() }?.let { "Owner: $it" },
+            r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
+        ).joinToString("   |   ")
+        if (ownerLine.isNotEmpty()) lines += layout(ownerLine, mid, textWidth, 2)
+        if (r.phone.isNotBlank()) lines += layout("Phone: ${r.phone}", mid, textWidth, 1)
+        lines += layout(if (r.fbrRegistered) "FBR Registered: YES" else "FBR Registered: NO", status, textWidth, 1)
+        if (r.address.isNotBlank()) lines += layout(r.address, big, textWidth, 3)
+        lines += layout(String.format(Locale.ENGLISH, "Lat %.6f°  Long %.6f°", r.lat, r.lng), small, textWidth, 1)
+        lines += layout(stampDate(r.createdAt), yellow, textWidth, 1)
 
         val gap = unit * 0.012f
         val textHeight = lines.sumOf { it.height } + gap * (lines.size - 1)
@@ -156,6 +169,19 @@ object Photo {
             MediaScannerConnection.scanFile(ctx, arrayOf(f.absolutePath), arrayOf("image/jpeg"), null)
             return Uri.fromFile(f)
         }
+    }
+
+    /** Replaces the gallery photo's content after an edit. Returns false if the old file is gone. */
+    fun overwriteGallery(ctx: Context, uri: Uri, bmp: Bitmap): Boolean = try {
+        if (uri.scheme == "file") {
+            FileOutputStream(File(uri.path!!)).use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+            MediaScannerConnection.scanFile(ctx, arrayOf(uri.path!!), arrayOf("image/jpeg"), null)
+        } else {
+            ctx.contentResolver.openOutputStream(uri, "wt")!!.use { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        }
+        true
+    } catch (e: Exception) {
+        false
     }
 
     /** Small thumbnail for the list screen. */

@@ -49,6 +49,7 @@ class FormActivity : AppCompatActivity() {
     private lateinit var preview: ImageView
     private lateinit var gpsStatus: TextView
     private lateinit var inName: TextInputEditText
+    private lateinit var inOwner: TextInputEditText
     private lateinit var inCnic: TextInputEditText
     private lateinit var inPhone: TextInputEditText
     private lateinit var inAddress: TextInputEditText
@@ -113,6 +114,7 @@ class FormActivity : AppCompatActivity() {
         preview = findViewById(R.id.preview)
         gpsStatus = findViewById(R.id.gpsStatus)
         inName = findViewById(R.id.inName)
+        inOwner = findViewById(R.id.inOwner)
         inCnic = findViewById(R.id.inCnic)
         inPhone = findViewById(R.id.inPhone)
         inAddress = findViewById(R.id.inAddress)
@@ -194,6 +196,7 @@ class FormActivity : AppCompatActivity() {
         title = "Edit record"
         findViewById<View>(R.id.btnRetake).visibility = View.GONE
         inName.setText(r.businessName)
+        inOwner.setText(r.ownerName)
         inCnic.setText(r.cnic)
         inPhone.setText(r.phone)
         inAddress.setText(r.address)
@@ -296,6 +299,7 @@ class FormActivity : AppCompatActivity() {
 
     private fun save() {
         val name = inName.text?.toString()?.trim().orEmpty()
+        val owner = inOwner.text?.toString()?.trim().orEmpty()
         val cnic = inCnic.text?.toString()?.trim().orEmpty()
         val phone = inPhone.text?.toString()?.trim().orEmpty()
         val address = inAddress.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
@@ -321,29 +325,47 @@ class FormActivity : AppCompatActivity() {
                 AlertDialog.Builder(this)
                     .setTitle("Same CNIC already saved")
                     .setMessage("This CNIC is already recorded for:\n${dup.businessName}\n\nSave anyway?")
-                    .setPositiveButton("Save anyway") { _, _ -> doSave(name, cnic, phone, address, fbr) }
+                    .setPositiveButton("Save anyway") { _, _ -> doSave(name, owner, cnic, phone, address, fbr) }
                     .setNegativeButton("Cancel", null)
                     .show()
                 return
             }
         }
-        doSave(name, cnic, phone, address, fbr)
+        doSave(name, owner, cnic, phone, address, fbr)
     }
 
-    private fun doSave(name: String, cnic: String, phone: String, address: String, fbr: Boolean) {
-        val e = editing
-        if (e != null) {
-            e.businessName = name; e.cnic = cnic; e.phone = phone; e.address = address; e.fbrRegistered = fbr
-            Store.upsert(this, e)
-            toast("Updated")
-            finish()
-            return
-        }
-
+    private fun doSave(name: String, owner: String, cnic: String, phone: String, address: String, fbr: Boolean) {
         @Suppress("DEPRECATION")
         val progress = ProgressDialog(this).apply {
             setMessage("Stamping and saving photo…"); setCancelable(false); show()
         }
+        val e = editing
+        if (e != null) {
+            e.businessName = name; e.ownerName = owner; e.cnic = cnic; e.phone = phone
+            e.address = address; e.fbrRegistered = fbr
+            io.execute {
+                Store.upsert(this, e)
+                // Redraw the stamp with the new details, if the original photo is kept.
+                var restamped = false
+                val raw = Store.rawPhoto(this, e.id)
+                if (raw.exists()) try {
+                    val photo = Photo.loadUpright(raw)
+                    val mapF = Store.mapFile(this, e.id)
+                    val map = android.graphics.BitmapFactory.decodeFile(mapF.absolutePath)
+                        ?: Geo.mapThumb(e.lat, e.lng, online = false)
+                    Photo.stamp(photo, map, e)
+                    restamped = Photo.overwriteGallery(this, Uri.parse(e.photoUri), photo)
+                    photo.recycle()
+                } catch (ex: Throwable) { }
+                runOnUiThread {
+                    progress.dismiss()
+                    toast(if (restamped) "Updated ✓  Photo stamp updated too" else "Updated ✓")
+                    finish()
+                }
+            }
+            return
+        }
+
         val la = lat; val ln = lng; val acc = accuracy; val time = captureTime
         io.execute {
             try {
@@ -352,19 +374,25 @@ class FormActivity : AppCompatActivity() {
                 } catch (ex: Exception) {
                     Geo.mapThumb(la, ln, online = false)
                 }
-                val photo = Photo.loadUpright(captureFile)
-                Photo.stamp(photo, map, address.ifBlank { null }, la, ln, time)
                 val fileName = "FBR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ENGLISH).format(Date(time)) +
                     "_" + Photo.safeFileName(name) + ".jpg"
+                val draft = Record(
+                    id = time, createdAt = time,
+                    businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
+                    fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
+                    photoUri = "", photoName = fileName,
+                )
+
+                val photo = Photo.loadUpright(captureFile)
+                // keep an unstamped copy + the map so the stamp can be redrawn after edits
+                Store.rawPhoto(this, time).outputStream().use { photo.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                Store.mapFile(this, time).outputStream().use { map.compress(Bitmap.CompressFormat.PNG, 100, it) }
+
+                Photo.stamp(photo, map, draft)
                 val uri = Photo.saveToGallery(this, photo, fileName)
                 photo.recycle()
 
-                Store.upsert(this, Record(
-                    id = time, createdAt = time,
-                    businessName = name, cnic = cnic, phone = phone, address = address,
-                    fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
-                    photoUri = uri.toString(), photoName = fileName,
-                ))
+                Store.upsert(this, draft.copy(photoUri = uri.toString()))
                 captureFile.delete()
                 runOnUiThread {
                     progress.dismiss()

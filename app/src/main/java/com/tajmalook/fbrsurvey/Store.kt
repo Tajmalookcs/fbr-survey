@@ -9,6 +9,7 @@ data class Record(
     val id: Long,
     val createdAt: Long,
     var businessName: String,
+    var ownerName: String,
     var cnic: String,
     var phone: String,
     var address: String,
@@ -23,6 +24,7 @@ data class Record(
         put("id", id)
         put("createdAt", createdAt)
         put("businessName", businessName)
+        put("ownerName", ownerName)
         put("cnic", cnic)
         put("phone", phone)
         put("address", address)
@@ -39,6 +41,7 @@ data class Record(
             id = o.getLong("id"),
             createdAt = o.getLong("createdAt"),
             businessName = o.optString("businessName"),
+            ownerName = o.optString("ownerName"),
             cnic = o.optString("cnic"),
             phone = o.optString("phone"),
             address = o.optString("address"),
@@ -88,7 +91,15 @@ object Store {
     @Synchronized
     fun delete(ctx: Context, id: Long) {
         write(ctx, all(ctx).filter { it.id != id })
+        rawPhoto(ctx, id).delete()
+        mapFile(ctx, id).delete()
     }
+
+    /** Unstamped original photo, kept so the stamp can be redrawn after edits. */
+    fun rawPhoto(ctx: Context, id: Long) = File(File(ctx.filesDir, "raw").apply { mkdirs() }, "$id.jpg")
+
+    /** Map thumbnail used in the stamp. */
+    fun mapFile(ctx: Context, id: Long) = File(File(ctx.filesDir, "raw").apply { mkdirs() }, "$id-map.png")
 
     fun get(ctx: Context, id: Long): Record? = all(ctx).firstOrNull { it.id == id }
 }

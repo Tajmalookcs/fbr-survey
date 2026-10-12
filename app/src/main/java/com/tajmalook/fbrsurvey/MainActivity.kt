@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
             val r = records[pos]
             AlertDialog.Builder(this)
                 .setTitle("Delete record?")
-                .setMessage("${r.businessName}\n\nThe record will be removed from the app. The photo stays in your gallery.")
+                .setMessage("${r.businessName}\n\nThe record will be removed from the app. The stamped photo stays in your gallery.")
                 .setPositiveButton("Delete") { _, _ -> Store.delete(this, r.id); refresh() }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -69,6 +69,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun refresh() {
         records = Store.all(this)
+        thumbs.evictAll()
         findViewById<TextView>(R.id.statTotal).text = records.size.toString()
         findViewById<TextView>(R.id.statYes).text = records.count { it.fbrRegistered }.toString()
         findViewById<TextView>(R.id.statNo).text = records.count { !it.fbrRegistered }.toString()
@@ -93,7 +94,7 @@ class MainActivity : AppCompatActivity() {
 
                 val dateFmt = SimpleDateFormat("dd-MM-yyyy", Locale.ENGLISH)
                 val timeFmt = SimpleDateFormat("hh:mm a", Locale.ENGLISH)
-                val header = listOf("Sr", "Date", "Time", "Business Name", "CNIC", "Phone", "Business Address",
+                val header = listOf("Sr", "Date", "Time", "Business Name", "Owner Name", "CNIC", "Phone", "Business Address",
                     "FBR Registered", "Latitude", "Longitude", "Google Maps Link", "Photo File")
                 val rows = data.mapIndexed { i, r ->
                     listOf(
@@ -101,6 +102,7 @@ class MainActivity : AppCompatActivity() {
                         dateFmt.format(Date(r.createdAt)),
                         timeFmt.format(Date(r.createdAt)),
                         r.businessName,
+                        r.ownerName,
                         r.cnic,
                         r.phone,
                         r.address,
@@ -111,7 +113,7 @@ class MainActivity : AppCompatActivity() {
                         r.photoName,
                     )
                 }
-                val widths = listOf(5, 12, 10, 28, 17, 14, 45, 15, 12, 12, 42, 40)
+                val widths = listOf(5, 12, 10, 28, 24, 17, 14, 45, 15, 12, 12, 42, 40)
                 file.outputStream().use { Xlsx.write(it, "Survey", header, rows, widths) }
 
                 val savedTo = try { copyToDownloads(file) } catch (e: Exception) { null }
@@ -169,7 +171,7 @@ class MainActivity : AppCompatActivity() {
             v.findViewById<TextView>(R.id.address).text =
                 r.address.ifBlank { String.format(Locale.ENGLISH, "%.5f, %.5f (address not entered)", r.lat, r.lng) }
             v.findViewById<TextView>(R.id.date).text =
-                listOf(dateFmt.format(Date(r.createdAt)), r.cnic, r.phone).filter { it.isNotBlank() }.joinToString("  •  ")
+                listOf(r.ownerName, dateFmt.format(Date(r.createdAt)), r.cnic).filter { it.isNotBlank() }.joinToString("  •  ")
 
             val status = v.findViewById<TextView>(R.id.status)
             status.text = if (r.fbrRegistered) "FBR ✓" else "Not reg."
