@@ -77,19 +77,19 @@ object Photo {
         val w = photo.width
         val h = photo.height
         val unit = min(w, h).toFloat()
-        val pad = unit * 0.025f
-        val mapSize = unit * 0.25f
+        val pad = unit * 0.018f
+        val mapSize = unit * 0.19f
         val textLeft = pad * 2 + mapSize
         val textWidth = (w - textLeft - pad).toInt()
 
         // ---- bottom strip text
         val big = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = unit * 0.042f
+            textSize = unit * 0.031f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
             setShadowLayer(unit * 0.003f, 0f, 0f, Color.BLACK)
         }
-        val small = TextPaint(big).apply { textSize = unit * 0.031f; color = Color.rgb(225, 225, 225) }
+        val small = TextPaint(big).apply { textSize = unit * 0.024f; color = Color.rgb(225, 225, 225) }
         val yellow = TextPaint(big).apply { color = Color.rgb(255, 214, 0) }
 
         val plus = PlusCode.encode(r.lat, r.lng)
@@ -100,45 +100,52 @@ object Photo {
         val dateLayout = layout(stampDate(r.createdAt), yellow, textWidth, 1, center = true)
         lines += dateLayout
 
-        val gap = unit * 0.014f
+        val gap = unit * 0.008f
         val textHeight = lines.sumOf { it.height } + gap * (lines.size - 1)
         val stripH = max(mapSize + pad * 2, textHeight + pad * 2)
         val stripTop = h - stripH
 
-        // ---- white box text
+        // ---- white box text (compact)
         val dark = Color.rgb(25, 25, 25)
         val boxTitle = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = dark
-            textSize = unit * 0.044f
+            textSize = unit * 0.030f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
         }
-        val boxText = TextPaint(boxTitle).apply { textSize = unit * 0.036f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL) }
-        val boxStatus = TextPaint(boxTitle).apply {
-            textSize = unit * 0.040f
-            color = if (r.fbrRegistered) Color.rgb(20, 140, 60) else Color.rgb(200, 30, 30)
-        }
+        val boxText = TextPaint(boxTitle).apply { textSize = unit * 0.026f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL) }
         val boxX = pad
-        val boxW = w - pad * 2
-        val inner = unit * 0.025f
-        val boxTextW = (boxW - inner * 2).toInt()
+        val inner = unit * 0.014f
+        val boxTextW = (w - pad * 2 - inner * 2).toInt()
         val boxLines = mutableListOf<StaticLayout>()
         if (r.businessName.isNotBlank()) boxLines += layout("Business: ${r.businessName}", boxTitle, boxTextW, 2)
-        if (r.ownerName.isNotBlank()) boxLines += layout("Owner: ${r.ownerName}", boxText, boxTextW, 2)
+
+        // Owner: NAME  |  Reg: YES   (Reg in bold green / red)
+        val ownerReg = android.text.SpannableStringBuilder()
+        if (r.ownerName.isNotBlank()) ownerReg.append("Owner: ${r.ownerName}  |  ")
+        val regStart = ownerReg.length
+        ownerReg.append(if (r.fbrRegistered) "Reg: YES" else "Reg: NO")
+        ownerReg.setSpan(android.text.style.StyleSpan(Typeface.BOLD), regStart, ownerReg.length, 0)
+        ownerReg.setSpan(android.text.style.ForegroundColorSpan(
+            if (r.fbrRegistered) Color.rgb(20, 140, 60) else Color.rgb(200, 30, 30)), regStart, ownerReg.length, 0)
+        boxLines += layout(ownerReg, boxText, boxTextW, 2)
+
         val idLine = listOfNotNull(
             if (r.cnicNotProvided) "CNIC: Not provided" else r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
-            r.phone.takeIf { it.isNotBlank() }?.let { "Phone: $it" },
-        ).joinToString("     ")
+            r.phone.takeIf { it.isNotBlank() }?.let { "Ph: $it" },
+        ).joinToString("  |  ")
         if (idLine.isNotEmpty()) boxLines += layout(idLine, boxText, boxTextW, 2)
-        boxLines += layout(if (r.fbrRegistered) "FBR Registered: YES" else "FBR Registered: NO", boxStatus, boxTextW, 1)
-        val boxGap = unit * 0.006f
+        val boxGap = unit * 0.004f
         val boxH = boxLines.sumOf { it.height } + boxGap * (boxLines.size - 1) + inner * 2
-        val boxTop = stripTop - unit * 0.02f - boxH
+        // box only as wide as its text
+        val contentW = boxLines.maxOf { l -> (0 until l.lineCount).maxOf { l.getLineWidth(it) } }
+        val boxW = min(contentW + inner * 2, w - pad * 2)
+        val boxTop = stripTop - unit * 0.012f - boxH
 
         val c = Canvas(photo)
 
         // white box
-        c.drawRoundRect(boxX, boxTop, boxX + boxW, boxTop + boxH, unit * 0.02f, unit * 0.02f,
-            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(240, 255, 255, 255) })
+        c.drawRoundRect(boxX, boxTop, boxX + boxW, boxTop + boxH, unit * 0.015f, unit * 0.015f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 255, 255, 255) })
         var by = boxTop + inner
         for (l in boxLines) {
             c.save(); c.translate(boxX + inner, by); l.draw(c); c.restore()
@@ -162,7 +169,7 @@ object Photo {
             c.translate(textLeft, y)
             if (l === dateLayout) {
                 // solid black box behind the date & time
-                val bx = unit * 0.018f
+                val bx = unit * 0.015f
                 val byy = unit * 0.006f
                 c.drawRoundRect(l.getLineLeft(0) - bx, -byy, l.getLineRight(0) + bx, l.height + byy,
                     unit * 0.008f, unit * 0.008f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK })
@@ -174,7 +181,7 @@ object Photo {
         return photo
     }
 
-    private fun layout(text: String, paint: TextPaint, width: Int, maxLines: Int, center: Boolean = false): StaticLayout =
+    private fun layout(text: CharSequence, paint: TextPaint, width: Int, maxLines: Int, center: Boolean = false): StaticLayout =
         StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
             .setAlignment(if (center) Layout.Alignment.ALIGN_CENTER else Layout.Alignment.ALIGN_NORMAL)
             .setMaxLines(maxLines)
