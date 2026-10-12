@@ -230,7 +230,7 @@ class MainActivity : AppCompatActivity() {
 
                 val header = listOf("Sr. No.", "Name of Field Formation", "Area", "Market Name", "Business Name",
                     "Name of Shopkeeper", "Business Address", "CNIC of Person Operating Shop", "Mobile Number",
-                    "Whether Registered or No", "Dated", "Google Location")
+                    "Whether Registered or No", "Dated", "Google Location", "Number on Signboard")
                 val rows = data.mapIndexed { i, r ->
                     val url = "https://maps.google.com/?q=${r.lat},${r.lng}"
                     listOf(
@@ -241,14 +241,15 @@ class MainActivity : AppCompatActivity() {
                         Xlsx.Cell(r.businessName.uppercase(Locale.ENGLISH), Xlsx.LEFT),
                         Xlsx.Cell(r.ownerName.uppercase(Locale.ENGLISH), Xlsx.LEFT),
                         Xlsx.Cell(r.address, Xlsx.LEFT),
-                        Xlsx.Cell(r.cnic.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
+                        Xlsx.Cell(if (r.cnicNotProvided) "Not provided" else r.cnic.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
                         Xlsx.Cell(r.phone.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
                         Xlsx.Cell(if (r.fbrRegistered) "Yes" else "No", Xlsx.CENTER),
                         Xlsx.Cell(dayFmt.format(Date(r.createdAt)), Xlsx.CENTER),
                         Xlsx.Cell(url, Xlsx.LINK, url),
+                        Xlsx.Cell(r.boardPhone.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
                     )
                 }
-                val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 42.0)
+                val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 42.0, 18.0)
                 file.outputStream().use {
                     val names = data.map { it.surveyor.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(", ")
                     Xlsx.writeReport(it, day ?: "Survey", title, "Survey Conducted by: $names", header, rows, widths)

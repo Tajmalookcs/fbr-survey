@@ -125,8 +125,9 @@ object Photo {
         if (r.businessName.isNotBlank()) boxLines += layout("Business: ${r.businessName}", boxTitle, boxTextW, 2)
         if (r.ownerName.isNotBlank()) boxLines += layout("Owner: ${r.ownerName}", boxText, boxTextW, 2)
         val idLine = listOfNotNull(
-            r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
+            if (r.cnicNotProvided) "CNIC: Not provided" else r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
             r.phone.takeIf { it.isNotBlank() }?.let { "Phone: $it" },
+            r.boardPhone.takeIf { it.isNotBlank() }?.let { "Board No: $it" },
         ).joinToString("     ")
         if (idLine.isNotEmpty()) boxLines += layout(idLine, boxText, boxTextW, 2)
         boxLines += layout(if (r.fbrRegistered) "FBR Registered: YES" else "FBR Registered: NO", boxStatus, boxTextW, 1)

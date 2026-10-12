@@ -23,6 +23,8 @@ data class Record(
     val accuracy: Float,
     val photoUri: String,
     val photoName: String,
+    var cnicNotProvided: Boolean = false,
+    var boardPhone: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -42,6 +44,8 @@ data class Record(
         put("accuracy", accuracy.toDouble())
         put("photoUri", photoUri)
         put("photoName", photoName)
+        put("cnicNotProvided", cnicNotProvided)
+        put("boardPhone", boardPhone)
     }
 
     companion object {
@@ -63,6 +67,8 @@ data class Record(
             accuracy = o.optDouble("accuracy", 0.0).toFloat(),
             photoUri = o.optString("photoUri"),
             photoName = o.optString("photoName"),
+            cnicNotProvided = o.optBoolean("cnicNotProvided"),
+            boardPhone = o.optString("boardPhone"),
         )
     }
 }
