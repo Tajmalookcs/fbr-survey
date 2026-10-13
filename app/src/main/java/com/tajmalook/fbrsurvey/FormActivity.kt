@@ -72,6 +72,7 @@ class FormActivity : AppCompatActivity() {
     private var lng = 0.0
     private var accuracy = 0f
     private var autoAddress: String? = null
+    private lateinit var btnSave: MaterialButton
     private var useManualOnPhoto = false
     private lateinit var btnStampManual: MaterialButton
     private lateinit var roRealAddress: TextInputEditText
@@ -189,7 +190,21 @@ class FormActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) { checkCnicOffline() }
         })
 
-        findViewById<MaterialButton>(R.id.btnSave).setOnClickListener { save() }
+        btnSave = findViewById(R.id.btnSave)
+        btnSave.setOnClickListener { save() }
+        findViewById<MaterialButton>(R.id.btnClose).setOnClickListener { onBackPressedDispatcher.onBackPressed() }
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (editing == null && photoTaken) {
+                    AlertDialog.Builder(this@FormActivity)
+                        .setTitle("Discard this survey?")
+                        .setMessage("This shop has not been saved yet.")
+                        .setPositiveButton("Discard") { _, _ -> finish() }
+                        .setNegativeButton("Keep editing", null)
+                        .show()
+                } else finish()
+            }
+        })
         findViewById<MaterialButton>(R.id.btnCheck).setOnClickListener { checkOnFbr() }
         findViewById<MaterialButton>(R.id.btnCopyPhone).setOnClickListener { copyAndOpenBrowser(inPhone) }
         gpsStatus.setOnClickListener { if (!hasLocation && editing == null) startLocation() }
@@ -290,17 +305,7 @@ class FormActivity : AppCompatActivity() {
         rgFbr.check(if (r.fbrRegistered) R.id.rbYes else R.id.rbNo)
         gpsStatus.text = String.format(Locale.ENGLISH, "📍 %.6f, %.6f  •  %s", r.lat, r.lng,
             SimpleDateFormat("dd MMM yyyy hh:mm a", Locale.ENGLISH).format(Date(r.createdAt)))
-        preview.setOnClickListener {
-            if (!Photo.galleryExists(this, Uri.parse(r.photoUri))) {
-                toast("Photo was deleted from the gallery. Tap Save to put it back."); return@setOnClickListener
-            }
-            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(r.photoUri), "image/*")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-        }
-        findViewById<MaterialButton>(R.id.btnGetAddress).apply {
-            visibility = View.VISIBLE
-            setOnClickListener { getFromSavedLocation(r) }
-        }
+        enableEditControls()
         if (r.address.isBlank() || r.mapAddress.isBlank()) io.execute {
             val addr = Geo.address(this, r.lat, r.lng)
             runOnUiThread {
@@ -461,8 +466,9 @@ class FormActivity : AppCompatActivity() {
             .putString("surveyor", surveyor).putString("formation", formation).putString("area", area).putString("market", market).apply()
         @Suppress("DEPRECATION")
         val progress = ProgressDialog(this).apply {
-            setMessage("Stamping and saving photo…"); setCancelable(false); show()
+            setMessage("Saving…"); setCancelable(false); show()
         }
+        btnSave.isEnabled = false
         val e = editing
         if (e != null) {
             e.cnicNotProvided = cbNoCnic.isChecked
@@ -471,18 +477,19 @@ class FormActivity : AppCompatActivity() {
             e.address = address; e.fbrRegistered = fbr
             e.stampUseManual = useManualOnPhoto && address.isNotBlank()
             io.execute {
-                // with internet: fill missing address / real map from the SAVED coordinates
-                val found = Restamp.fillFromSavedLocation(this, e)
+                // quick: redraw with what we have now (no waiting for internet)
                 val res = Restamp.redraw(this, e)
                 runOnUiThread {
                     progress.dismiss()
+                    btnSave.isEnabled = true
                     toast(when (res) {
-                        Restamp.Result.RESTORED -> "Updated ✓  Photo restored to Gallery → ${Photo.ALBUM}"
-                        Restamp.Result.RESTAMPED -> if (found) "Updated ✓  Map/address filled from saved location" else "Updated ✓  Photo stamp updated too"
-                        else -> "Updated ✓"
+                        Restamp.Result.RESTORED -> "Saved ✓  Photo restored to Gallery → ${Photo.ALBUM}"
+                        Restamp.Result.RESTAMPED -> "Saved ✓  Photo updated"
+                        else -> "Saved ✓"
                     })
-                    finish()
+                    reloadPreview()
                 }
+                if (!e.mapReal || e.mapAddress.isBlank()) backgroundFill(e)
             }
             return
         }
@@ -493,8 +500,9 @@ class FormActivity : AppCompatActivity() {
         val stampAddr = autoAddress.orEmpty()   // real address from GPS, not the edited field
         io.execute {
             try {
+                // wait a little for the map, never long
                 val mr = try {
-                    mapFuture?.get(15, TimeUnit.SECONDS) ?: Geo.mapThumbResult(la, ln, online = false)
+                    mapFuture?.get(3, TimeUnit.SECONDS) ?: Geo.mapThumbResult(la, ln, online = false)
                 } catch (ex: Exception) {
                     Geo.mapThumbResult(la, ln, online = false)
                 }
@@ -519,19 +527,76 @@ class FormActivity : AppCompatActivity() {
                 val uri = Photo.saveToGallery(this, photo, fileName)
                 photo.recycle()
 
-                Store.upsert(this, draft.copy(photoUri = uri.toString()))
+                val saved = draft.copy(photoUri = uri.toString())
+                Store.upsert(this, saved)
                 captureFile.delete()
                 runOnUiThread {
                     progress.dismiss()
+                    btnSave.isEnabled = true
                     toast("Saved ✓  Photo is in Gallery → ${Photo.ALBUM}")
-                    finish()
+                    switchToEdit(saved)
                 }
+                if (!saved.mapReal || saved.mapAddress.isBlank()) backgroundFill(saved)
             } catch (ex: Throwable) {
                 runOnUiThread {
                     progress.dismiss()
+                    btnSave.isEnabled = true
                     toast("Save failed: ${ex.message}")
                 }
             }
+        }
+    }
+
+    /** After the first save, the form stays open as an edit of the saved shop (no duplicates). */
+    private fun switchToEdit(r: Record) {
+        editing = r
+        title = "Edit record"
+        initialCnic = r.cnic.filter { it.isDigit() }
+        findViewById<View>(R.id.btnRetake).visibility = View.GONE
+        enableEditControls()
+        updateRealViews()
+    }
+
+    private fun enableEditControls() {
+        preview.setOnClickListener {
+            val r = editing ?: return@setOnClickListener
+            if (!Photo.galleryExists(this, Uri.parse(r.photoUri))) {
+                toast("Photo was deleted from the gallery. Tap Save to put it back."); return@setOnClickListener
+            }
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(r.photoUri), "image/*")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        }
+        findViewById<MaterialButton>(R.id.btnGetAddress).apply {
+            visibility = View.VISIBLE
+            setOnClickListener { editing?.let { getFromSavedLocation(it) } }
+        }
+    }
+
+    private fun reloadPreview() {
+        val r = editing ?: return
+        if (io.isShutdown) return
+        io.execute {
+            val b = Photo.thumbFor(this, r, 900)
+            runOnUiThread { if (b != null && !isDestroyed) preview.setImageBitmap(b) }
+        }
+    }
+
+    /** With internet, fills real map/address from the SAVED coordinates after saving; never blocks the screen. */
+    private fun backgroundFill(r: Record) {
+        val app = applicationContext
+        Bg.io.execute {
+            try {
+                if (Restamp.fillFromSavedLocation(app, r)) {
+                    Restamp.redraw(app, r)
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        if (inAddress.text.isNullOrBlank() && r.address.isNotBlank()) inAddress.setText(r.address)
+                        updateRealViews()
+                        reloadPreview()
+                        toast("Map/address updated from saved location ✓")
+                    }
+                }
+            } catch (e: Throwable) { }
         }
     }
 
