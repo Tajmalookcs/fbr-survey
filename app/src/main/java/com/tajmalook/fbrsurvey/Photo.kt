@@ -93,7 +93,8 @@ object Photo {
         val yellow = TextPaint(big).apply { color = Color.rgb(255, 214, 0) }
 
         val plus = PlusCode.encode(r.lat, r.lng)
-        val addressLine = if (r.mapAddress.isNotBlank()) "${plus.substring(4)}, ${r.mapAddress}" else plus
+        val shownAddress = if (r.stampUseManual && r.address.isNotBlank()) r.address else r.mapAddress
+        val addressLine = if (shownAddress.isNotBlank()) "${plus.substring(4)}, $shownAddress" else plus
         val lines = mutableListOf<StaticLayout>()
         lines += layout(addressLine, big, textWidth, 3, center = true)
         lines += layout(String.format(Locale.ENGLISH, "Lat %.6f°  Long %.6f°", r.lat, r.lng), small, textWidth, 1, center = true)

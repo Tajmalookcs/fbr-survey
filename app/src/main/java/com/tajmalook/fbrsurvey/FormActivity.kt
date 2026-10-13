@@ -72,6 +72,10 @@ class FormActivity : AppCompatActivity() {
     private var lng = 0.0
     private var accuracy = 0f
     private var autoAddress: String? = null
+    private var useManualOnPhoto = false
+    private lateinit var btnStampManual: MaterialButton
+    private lateinit var roRealAddress: TextInputEditText
+    private lateinit var roCoords: TextInputEditText
     private var mapFuture: Future<Geo.MapResult>? = null
     private var waitingForLocationSettings = false
 
@@ -119,6 +123,7 @@ class FormActivity : AppCompatActivity() {
                         val cur = inAddress.text?.toString().orEmpty()
                         if (cur.isBlank() || cur == autoAddress) inAddress.setText(a)
                         autoAddress = a
+                        updateRealViews()
                     }
                     onLocation(null)
                 } else if (!hasLocation) {
@@ -166,6 +171,15 @@ class FormActivity : AppCompatActivity() {
             findViewById<View>(R.id.btnCheck).isEnabled = !checked
         }
         inAddress = findViewById(R.id.inAddress)
+        btnStampManual = findViewById(R.id.btnStampManual)
+        roRealAddress = findViewById(R.id.roRealAddress)
+        roCoords = findViewById(R.id.roCoords)
+        btnStampManual.setOnClickListener {
+            if (!useManualOnPhoto && inAddress.text.isNullOrBlank()) { toast("Type an address first"); return@setOnClickListener }
+            useManualOnPhoto = !useManualOnPhoto
+            updateRealViews()
+            toast(if (useManualOnPhoto) "Photo will show your typed address" else "Photo will show the real GPS address")
+        }
         rgFbr = findViewById(R.id.rgFbr)
         inCnic.addTextChangedListener(CnicFormatter(inCnic))
         fbrStatus = findViewById(R.id.fbrStatus)
@@ -187,6 +201,7 @@ class FormActivity : AppCompatActivity() {
         }
 
         title = "New survey"
+        updateRealViews()
         if (savedInstanceState == null) {
             val prefs = getSharedPreferences("form", MODE_PRIVATE)
             inSurveyor.setText(prefs.getString("surveyor", ""))
@@ -204,6 +219,7 @@ class FormActivity : AppCompatActivity() {
             lng = savedInstanceState.getDouble("lng")
             accuracy = savedInstanceState.getFloat("accuracy")
             autoAddress = savedInstanceState.getString("autoAddress")
+            useManualOnPhoto = savedInstanceState.getBoolean("useManual")
             if (photoTaken) showPreview()
             if (hasLocation) onLocation(null) else if (hasLocationPerm()) startLocation()
             return
@@ -237,6 +253,7 @@ class FormActivity : AppCompatActivity() {
         outState.putDouble("lng", lng)
         outState.putFloat("accuracy", accuracy)
         outState.putString("autoAddress", autoAddress)
+        outState.putBoolean("useManual", useManualOnPhoto)
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -268,6 +285,8 @@ class FormActivity : AppCompatActivity() {
         inPhone.setText(r.phone)
         cbNoCnic.isChecked = r.cnicNotProvided
         inAddress.setText(r.address)
+        useManualOnPhoto = r.stampUseManual
+        updateRealViews()
         rgFbr.check(if (r.fbrRegistered) R.id.rbYes else R.id.rbNo)
         gpsStatus.text = String.format(Locale.ENGLISH, "📍 %.6f, %.6f  •  %s", r.lat, r.lng,
             SimpleDateFormat("dd MMM yyyy hh:mm a", Locale.ENGLISH).format(Date(r.createdAt)))
@@ -287,6 +306,7 @@ class FormActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed || addr == null) return@runOnUiThread
                 if (r.mapAddress.isBlank()) r.mapAddress = addr      // photo stamp address
+                updateRealViews()
                 if (inAddress.text.isNullOrBlank()) inAddress.setText(addr)
                 gpsStatus.text = gpsStatus.text.toString() + "\n✓ Address found from saved location. Tap Save to update the photo."
             }
@@ -369,6 +389,7 @@ class FormActivity : AppCompatActivity() {
             hasLocation = true
         }
         gpsStatus.text = String.format(Locale.ENGLISH, "📍 %.6f, %.6f (±%.0f m)  •  finding address…", lat, lng, accuracy)
+        updateRealViews()
 
         mapFuture = io.submit<Geo.MapResult> { Geo.mapThumbResult(lat, lng) }
 
@@ -382,6 +403,7 @@ class FormActivity : AppCompatActivity() {
                     val current = inAddress.text?.toString().orEmpty()
                     if (current.isBlank() || current == autoAddress) inAddress.setText(addr)
                     autoAddress = addr
+                    updateRealViews()
                     gpsStatus.text = "$base  •  address found"
                 } else {
                     gpsStatus.text = "$base  •  no internet: enter address manually or later"
@@ -447,6 +469,7 @@ class FormActivity : AppCompatActivity() {
             e.surveyor = surveyor; e.formation = formation; e.area = area; e.market = market
             e.businessName = name; e.ownerName = owner; e.cnic = cnic; e.phone = phone
             e.address = address; e.fbrRegistered = fbr
+            e.stampUseManual = useManualOnPhoto && address.isNotBlank()
             io.execute {
                 // with internet: fill missing address / real map from the SAVED coordinates
                 val found = Restamp.fillFromSavedLocation(this, e)
@@ -466,6 +489,7 @@ class FormActivity : AppCompatActivity() {
 
         val la = lat; val ln = lng; val acc = accuracy; val time = captureTime
         val noCnic = cbNoCnic.isChecked
+        val useManual = useManualOnPhoto && address.isNotBlank()
         val stampAddr = autoAddress.orEmpty()   // real address from GPS, not the edited field
         io.execute {
             try {
@@ -480,7 +504,7 @@ class FormActivity : AppCompatActivity() {
                 val draft = Record(
                     id = time, createdAt = time,
                     surveyor = surveyor, formation = formation, area = area, market = market,
-                    cnicNotProvided = noCnic, mapReal = mr.real, mapAddress = stampAddr,
+                    cnicNotProvided = noCnic, mapReal = mr.real, mapAddress = stampAddr, stampUseManual = useManual,
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
                     fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
                     photoUri = "", photoName = fileName,
@@ -596,6 +620,7 @@ class FormActivity : AppCompatActivity() {
                 editing?.mapReal = true
             }
             if (addr != null) r.mapAddress = addr   // photo stamp always uses the real map address
+            runOnUiThread { updateRealViews() }
             runOnUiThread {
                 progress.dismiss()
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -625,6 +650,25 @@ class FormActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /** Fills the read-only "real address" + "real coordinates" boxes and the photo-address button. */
+    private fun updateRealViews() {
+        val e = editing
+        val la = e?.lat ?: lat
+        val ln = e?.lng ?: lng
+        val have = e != null || hasLocation
+        val real = (if (e != null) e.mapAddress else autoAddress.orEmpty())
+        if (have) {
+            val plus = PlusCode.encode(la, ln)
+            roRealAddress.setText(if (real.isNotBlank()) "${plus.substring(4)}, $real" else "$plus  (address not found yet)")
+            roCoords.setText(String.format(Locale.ENGLISH, "%.6f, %.6f", la, ln))
+        } else {
+            roRealAddress.setText("Waiting for GPS…")
+            roCoords.setText("")
+        }
+        btnStampManual.text = if (useManualOnPhoto) "✓ Photo shows typed address (tap to use real address)"
+            else "Use this address on photo"
     }
 
     // ---------- helpers ----------
