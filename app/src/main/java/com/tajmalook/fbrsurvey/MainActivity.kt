@@ -31,7 +31,9 @@ class MainActivity : AppCompatActivity() {
 
     private val io = Executors.newFixedThreadPool(2)
     private val thumbs = LruCache<String, Bitmap>(60)
-    private var records: List<Record> = emptyList()
+    private var allRecords: List<Record> = emptyList()   // everything (stats, export)
+    private var records: List<Record> = emptyList()      // shown in the list (search filter)
+    private var query = ""
     private lateinit var adapter: RecordAdapter
 
     private val importLauncher =
@@ -66,6 +68,11 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, FormActivity::class.java))
         }
         findViewById<View>(R.id.btnExport).setOnClickListener { export() }
+        findViewById<android.widget.EditText>(R.id.inSearch).addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) { query = s?.toString().orEmpty(); applySearch() }
+        })
     }
 
     override fun onResume() {
@@ -74,12 +81,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refresh() {
-        records = Store.all(this)
+        allRecords = Store.all(this)
         thumbs.evictAll()
-        findViewById<TextView>(R.id.statTotal).text = records.size.toString()
-        findViewById<TextView>(R.id.statYes).text = records.count { it.fbrRegistered }.toString()
-        findViewById<TextView>(R.id.statNo).text = records.count { !it.fbrRegistered }.toString()
-        findViewById<View>(R.id.emptyText).visibility = if (records.isEmpty()) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.statTotal).text = allRecords.size.toString()
+        findViewById<TextView>(R.id.statYes).text = allRecords.count { it.fbrRegistered }.toString()
+        findViewById<TextView>(R.id.statNo).text = allRecords.count { !it.fbrRegistered }.toString()
+        applySearch()
+    }
+
+    /** Filters the list by business name (any part, upper/lower case ignored). */
+    private fun applySearch() {
+        val q = query.trim()
+        records = if (q.isEmpty()) allRecords else allRecords.filter { it.businessName.contains(q, ignoreCase = true) }
+        val empty = findViewById<TextView>(R.id.emptyText)
+        when {
+            allRecords.isEmpty() -> { empty.text = "No shops surveyed yet.\nTap New survey to start."; empty.visibility = View.VISIBLE }
+            records.isEmpty() -> { empty.text = "No shop found for \"$q\""; empty.visibility = View.VISIBLE }
+            else -> empty.visibility = View.GONE
+        }
         adapter.notifyDataSetChanged()
     }
 
@@ -228,13 +247,13 @@ class MainActivity : AppCompatActivity() {
     // ---------- Excel export ----------
 
     private fun export() {
-        if (records.isEmpty()) {
+        if (allRecords.isEmpty()) {
             Toast.makeText(this, "No records to export yet", Toast.LENGTH_SHORT).show(); return
         }
         val dayFmt = SimpleDateFormat("dd.MM.yyyy", Locale.ENGLISH)
-        val byDay = records.groupBy { dayFmt.format(Date(it.createdAt)) }
+        val byDay = allRecords.groupBy { dayFmt.format(Date(it.createdAt)) }
         val days = byDay.keys.sortedByDescending { dayFmt.parse(it)?.time ?: 0L }
-        val choices = days.map { "$it  (${byDay[it]!!.size} shops)" } + "All dates  (${records.size} shops)"
+        val choices = days.map { "$it  (${byDay[it]!!.size} shops)" } + "All dates  (${allRecords.size} shops)"
 
         val prefs = getSharedPreferences("export", MODE_PRIVATE)
         val pad = (16 * resources.displayMetrics.density).toInt()
@@ -262,7 +281,7 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putString("title", title).apply()
                 val pos = spinner.selectedItemPosition
                 val day = days.getOrNull(pos)
-                val chosen = if (day != null) byDay[day]!! else records
+                val chosen = if (day != null) byDay[day]!! else allRecords
                 writeExcel(title, day, chosen.sortedBy { it.createdAt })
             }
             .setNegativeButton("Cancel", null)
