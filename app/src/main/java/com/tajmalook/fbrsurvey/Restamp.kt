@@ -16,6 +16,7 @@ object Restamp {
      * Coordinates, date and time are never changed. Returns true if anything new was found.
      */
     fun fillFromSavedLocation(ctx: Context, r: Record): Boolean {
+        if (r.lat == 0.0 && r.lng == 0.0) return false   // saved without GPS
         var changed = false
         if (r.mapAddress.isBlank()) {
             Geo.address(ctx, r.lat, r.lng)?.let {

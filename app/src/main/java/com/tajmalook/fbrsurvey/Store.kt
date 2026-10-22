@@ -22,7 +22,7 @@ data class Record(
     var lng: Double,
     var accuracy: Float,
     var photoUri: String,
-    val photoName: String,
+    var photoName: String,
     var cnicNotProvided: Boolean = false,
     var boardPhone: String = "",
     var mapReal: Boolean = false,

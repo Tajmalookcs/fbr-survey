@@ -64,9 +64,7 @@ class MainActivity : AppCompatActivity() {
             true
         }
 
-        findViewById<View>(R.id.btnNew).setOnClickListener {
-            startActivity(Intent(this, FormActivity::class.java))
-        }
+        findViewById<View>(R.id.btnNew).setOnClickListener { startNewSurvey() }
         findViewById<View>(R.id.btnExport).setOnClickListener { export() }
         findViewById<android.widget.EditText>(R.id.inSearch).addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -180,12 +178,14 @@ class MainActivity : AppCompatActivity() {
         menu.add(0, 1, 0, "About").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_ALWAYS)
         menu.add(0, 2, 1, "Import FBR data").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(0, 3, 2, "Update offline records").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+        menu.add(0, 4, 3, "Start new survey with…").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
         return true
     }
 
     override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
         if (item.itemId == 1) { showAbout(); return true }
         if (item.itemId == 3) { updateOfflineRecords(); return true }
+        if (item.itemId == 4) { chooseStartMode(); return true }
         if (item.itemId == 2) {
             AlertDialog.Builder(this)
                 .setTitle("Import FBR data")
@@ -196,6 +196,50 @@ class MainActivity : AppCompatActivity() {
             return true
         }
         return super.onOptionsItemSelected(item)
+    }
+
+    // ---------- new survey: photo first or details first ----------
+
+    private fun startNewSurvey() {
+        when (getSharedPreferences("app", MODE_PRIVATE).getString("startMode", "")) {
+            "photo" -> openForm(detailsFirst = false)
+            "details" -> openForm(detailsFirst = true)
+            else -> {
+                val pad = (20 * resources.displayMetrics.density).toInt()
+                val remember = android.widget.CheckBox(this).apply { text = "Remember my choice" }
+                val box = android.widget.LinearLayout(this).apply { setPadding(pad, pad / 2, pad, 0); addView(remember) }
+                fun pick(mode: String) {
+                    if (remember.isChecked) getSharedPreferences("app", MODE_PRIVATE).edit().putString("startMode", mode).apply()
+                    openForm(detailsFirst = mode == "details")
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("New survey")
+                    .setMessage("How do you want to start?")
+                    .setView(box)
+                    .setPositiveButton("📷 Photo first") { _, _ -> pick("photo") }
+                    .setNegativeButton("📝 Details first") { _, _ -> pick("details") }
+                    .show()
+            }
+        }
+    }
+
+    private fun openForm(detailsFirst: Boolean) {
+        startActivity(Intent(this, FormActivity::class.java).putExtra(FormActivity.EXTRA_DETAILS_FIRST, detailsFirst))
+    }
+
+    private fun chooseStartMode() {
+        val prefs = getSharedPreferences("app", MODE_PRIVATE)
+        val modes = arrayOf("photo", "details", "")
+        val labels = arrayOf("📷 Photo first", "📝 Details first", "Ask every time")
+        val current = modes.indexOf(prefs.getString("startMode", "")).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("Start new survey with…")
+            .setSingleChoiceItems(labels, current) { d, which ->
+                prefs.edit().putString("startMode", modes[which]).apply()
+                Toast.makeText(this, "New survey: ${labels[which]}", Toast.LENGTH_SHORT).show()
+                d.dismiss()
+            }
+            .show()
     }
 
     private fun showAbout() {
@@ -304,7 +348,7 @@ class MainActivity : AppCompatActivity() {
                     "Name of Shopkeeper", "Business Address", "CNIC of Person Operating Shop", "Mobile Number",
                     "Whether Registered or No", "Dated", "Google Location")
                 val rows = data.mapIndexed { i, r ->
-                    val url = "https://maps.google.com/?q=${r.lat},${r.lng}"
+                    val url = if (r.lat == 0.0 && r.lng == 0.0) "" else "https://maps.google.com/?q=${r.lat},${r.lng}"
                     listOf(
                         Xlsx.Cell(i + 1, Xlsx.CENTER),
                         Xlsx.Cell(r.formation, Xlsx.LEFT),
@@ -317,7 +361,7 @@ class MainActivity : AppCompatActivity() {
                         Xlsx.Cell(r.phone.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
                         Xlsx.Cell(if (r.fbrRegistered) "Yes" else "No", Xlsx.CENTER),
                         Xlsx.Cell(dayFmt.format(Date(r.createdAt)), Xlsx.CENTER),
-                        Xlsx.Cell(url, Xlsx.LINK, url),
+                        if (url.isEmpty()) Xlsx.Cell("", Xlsx.CENTER) else Xlsx.Cell(url, Xlsx.LINK, url),
                     )
                 }
                 val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 42.0)
@@ -381,7 +425,8 @@ class MainActivity : AppCompatActivity() {
             v.findViewById<TextView>(R.id.address).text =
                 r.address.ifBlank { String.format(Locale.ENGLISH, "%.5f, %.5f (address not entered)", r.lat, r.lng) }
             v.findViewById<TextView>(R.id.date).text =
-                listOf(r.ownerName, dateFmt.format(Date(r.createdAt)), r.cnic).filter { it.isNotBlank() }.joinToString("  •  ")
+                (listOf(r.ownerName, dateFmt.format(Date(r.createdAt)), r.cnic) +
+                    (if (r.photoName.isBlank()) listOf("📷 No photo") else emptyList())).filter { it.isNotBlank() }.joinToString("  •  ")
 
             val status = v.findViewById<TextView>(R.id.status)
             status.text = if (r.fbrRegistered) "FBR ✓" else "Not reg."
@@ -391,7 +436,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val upd = v.findViewById<View>(R.id.btnRowUpdate)
-            upd.visibility = if (r.mapAddress.isBlank() || !r.mapReal) View.VISIBLE else View.GONE
+            upd.visibility = if (r.photoName.isNotBlank() && (r.mapAddress.isBlank() || !r.mapReal)) View.VISIBLE else View.GONE
             upd.setOnClickListener { updateOne(r) }
 
             val img = v.findViewById<ImageView>(R.id.thumb)

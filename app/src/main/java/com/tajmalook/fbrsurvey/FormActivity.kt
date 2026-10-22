@@ -42,6 +42,7 @@ class FormActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_ID = "id"
+        const val EXTRA_DETAILS_FIRST = "detailsFirst"
     }
 
     private val io = Executors.newFixedThreadPool(3)
@@ -74,6 +75,8 @@ class FormActivity : AppCompatActivity() {
     private var autoAddress: String? = null
     /** a new photo was taken for an already-saved shop; applied on Save */
     private var retakePending = false
+    /** New survey opened in 'Enter details first' mode (camera not opened automatically). */
+    private var detailsFirst = false
     private lateinit var btnSave: MaterialButton
     private var useManualOnPhoto = false
     private lateinit var btnStampManual: MaterialButton
@@ -101,7 +104,7 @@ class FormActivity : AppCompatActivity() {
                     .setCancelable(false)
                     .show()
             } else {
-                openCamera()
+                if (detailsFirst) startLocation() else openCamera()
             }
         }
 
@@ -134,9 +137,10 @@ class FormActivity : AppCompatActivity() {
                     if (retake) hasLocation = false   // new photo needs its own GPS fix
                     if (!hasLocation) startLocation()
                 }
-            } else if (!photoTaken && editing == null) {
+            } else if (!photoTaken && editing == null && !detailsFirst) {
                 finish() // cancelled the very first photo
             }
+            updatePhotoButton()
         }
 
     private val cameraLauncher =
@@ -147,9 +151,10 @@ class FormActivity : AppCompatActivity() {
                 showPreview()
                 if (markRetake()) hasLocation = false
                 if (!hasLocation) startLocation()
-            } else if (!photoTaken && editing == null) {
+            } else if (!photoTaken && editing == null && !detailsFirst) {
                 finish() // cancelled the very first photo
             }
+            updatePhotoButton()
         }
 
     // ---------- lifecycle ----------
@@ -200,7 +205,7 @@ class FormActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.btnClose).setOnClickListener { onBackPressedDispatcher.onBackPressed() }
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (editing == null && photoTaken) {
+                if (editing == null && (photoTaken || !inName.text.isNullOrBlank())) {
                     AlertDialog.Builder(this@FormActivity)
                         .setTitle("Discard this survey?")
                         .setMessage("This shop has not been saved yet.")
@@ -222,8 +227,11 @@ class FormActivity : AppCompatActivity() {
         }
 
         title = "New survey"
+        detailsFirst = intent.getBooleanExtra(EXTRA_DETAILS_FIRST, false)
         updateRealViews()
+        updatePhotoButton()
         if (savedInstanceState == null) {
+            rgFbr.check(R.id.rbNo)   // default: Not registered (FBR data check can switch it to Yes)
             val prefs = getSharedPreferences("form", MODE_PRIVATE)
             inSurveyor.setText(prefs.getString("surveyor", ""))
             inFormation.setText(prefs.getString("formation", "RTO Faisalabad"))
@@ -241,6 +249,7 @@ class FormActivity : AppCompatActivity() {
             autoAddress = savedInstanceState.getString("autoAddress")
             useManualOnPhoto = savedInstanceState.getBoolean("useManual")
             if (photoTaken) showPreview()
+            updatePhotoButton()
             if (hasLocation) onLocation(null) else if (hasLocationPerm()) startLocation()
             return
         }
@@ -250,7 +259,7 @@ class FormActivity : AppCompatActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) needed += Manifest.permission.WRITE_EXTERNAL_STORAGE
         if (needed.all { hasPerm(it) }) {
-            openCamera()
+            if (detailsFirst) startLocation() else openCamera()
         } else {
             permissionLauncher.launch(needed.toTypedArray())
         }
@@ -306,6 +315,7 @@ class FormActivity : AppCompatActivity() {
         inAddress.setText(r.address)
         useManualOnPhoto = r.stampUseManual
         updateRealViews()
+        updatePhotoButton()
         rgFbr.check(if (r.fbrRegistered) R.id.rbYes else R.id.rbNo)
         gpsStatus.text = String.format(Locale.ENGLISH, "📍 %.6f, %.6f  •  %s", r.lat, r.lng,
             SimpleDateFormat("dd MMM yyyy hh:mm a", Locale.ENGLISH).format(Date(r.createdAt)))
@@ -438,8 +448,7 @@ class FormActivity : AppCompatActivity() {
         val cnicDigits = cnic.filter { it.isDigit() }
         val phoneDigits = phone.filter { it.isDigit() }
         when {
-            editing == null && !photoTaken -> return toast("Take the shop photo first")
-            editing == null && !hasLocation -> return toast("Waiting for GPS location. Please wait or tap the GPS line to retry.")
+            editing == null && photoTaken && !hasLocation -> return toast("Waiting for GPS location. Please wait or tap the GPS line to retry.")
             retakePending && !hasLocation -> return toast("Waiting for GPS for the new photo. Please wait a moment.")
             name.isEmpty() -> { inName.error = "Required"; inName.requestFocus(); return }
             cnic.isNotEmpty() && cnicDigits.length != 13 -> { inCnic.error = "CNIC must have 13 digits"; inCnic.requestFocus(); return }
@@ -448,6 +457,22 @@ class FormActivity : AppCompatActivity() {
         }
         val fbr = fbrId == R.id.rbYes
 
+        val proceed = { saveAfterChecks(surveyor, formation, area, market, name, owner, cnic, phone, address, fbr, cnicDigits) }
+        val noPhotoYet = !photoTaken && (editing == null || editing?.photoName.isNullOrBlank())
+        if (noPhotoYet && !retakePending) {
+            AlertDialog.Builder(this)
+                .setTitle("No photo taken")
+                .setMessage("Save this shop without a photo?\n\nYou can add the photo later: open the shop, tap Take photo, then Save.")
+                .setPositiveButton("Save anyway") { _, _ -> proceed() }
+                .setNegativeButton("Take photo") { _, _ -> openCamera() }
+                .show()
+            return
+        }
+        proceed()
+    }
+
+    private fun saveAfterChecks(surveyor: String, formation: String, area: String, market: String, name: String,
+                                owner: String, cnic: String, phone: String, address: String, fbr: Boolean, cnicDigits: String) {
         if (cnicDigits.length == 13) {
             val dup = Store.all(this).firstOrNull {
                 it.id != editing?.id && it.cnic.filter { c -> c.isDigit() } == cnicDigits
@@ -482,6 +507,7 @@ class FormActivity : AppCompatActivity() {
             e.address = address; e.fbrRegistered = fbr
             e.stampUseManual = useManualOnPhoto && address.isNotBlank()
             val retake = retakePending
+            val hadPhoto = e.photoName.isNotBlank()
             val nla = lat; val nln = lng; val nacc = accuracy; val ntime = captureTime
             val nAddr = autoAddress.orEmpty(); val mf = mapFuture
             io.execute {
@@ -498,6 +524,10 @@ class FormActivity : AppCompatActivity() {
                     Store.mapFile(this, e.id).outputStream().use { mr.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                     e.createdAt = ntime; e.lat = nla; e.lng = nln; e.accuracy = nacc
                     e.mapAddress = nAddr; e.mapReal = mr.real
+                    // keep the old photo in the gallery: the new one is saved as a separate file
+                    e.photoUri = ""
+                    e.photoName = "FBR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ENGLISH).format(Date(ntime)) +
+                        "_" + Photo.safeFileName(name) + ".jpg"
                     captureFile.delete()
                     runOnUiThread { retakePending = false }
                 } catch (ex: Throwable) {
@@ -509,13 +539,44 @@ class FormActivity : AppCompatActivity() {
                     progress.dismiss()
                     btnSave.isEnabled = true
                     toast(when (res) {
-                        Restamp.Result.RESTORED -> "Saved ✓  Photo restored to Gallery → ${Photo.ALBUM}"
+                        Restamp.Result.RESTORED -> when {
+                            retake && hadPhoto -> "Saved ✓  New photo added. Old photo kept in Gallery"
+                            retake -> "Saved ✓  Photo added to Gallery → ${Photo.ALBUM}"
+                            else -> "Saved ✓  Photo restored to Gallery → ${Photo.ALBUM}"
+                        }
                         Restamp.Result.RESTAMPED -> "Saved ✓  Photo updated"
                         else -> "Saved ✓"
                     })
                     reloadPreview()
+                    updatePhotoButton()
                 }
                 if (!e.mapReal || e.mapAddress.isBlank()) backgroundFill(e)
+            }
+            return
+        }
+
+        if (!photoTaken) {
+            // details saved without a photo: keep the current GPS (if any) for Excel
+            val now = System.currentTimeMillis()
+            val rec = Record(
+                id = now, createdAt = now,
+                surveyor = surveyor, formation = formation, area = area, market = market,
+                cnicNotProvided = cbNoCnic.isChecked, mapReal = false, mapAddress = autoAddress.orEmpty(),
+                stampUseManual = useManualOnPhoto && address.isNotBlank(),
+                businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
+                fbrRegistered = fbr,
+                lat = if (hasLocation) lat else 0.0, lng = if (hasLocation) lng else 0.0,
+                accuracy = if (hasLocation) accuracy else 0f,
+                photoUri = "", photoName = "",
+            )
+            io.execute {
+                Store.upsert(this, rec)
+                runOnUiThread {
+                    progress.dismiss()
+                    btnSave.isEnabled = true
+                    toast(if (hasLocation) "Saved ✓  without photo" else "Saved ✓  without photo and without GPS")
+                    switchToEdit(rec)
+                }
             }
             return
         }
@@ -580,6 +641,7 @@ class FormActivity : AppCompatActivity() {
         initialCnic = r.cnic.filter { it.isDigit() }
         enableEditControls()
         updateRealViews()
+        updatePhotoButton()
     }
 
     private fun enableEditControls() {
@@ -768,6 +830,13 @@ class FormActivity : AppCompatActivity() {
         toast("New photo taken. Tap Save to replace the old photo.")
         updateRealViews()
         return true
+    }
+
+    /** "Take photo" when the shop has no photo yet, otherwise "Retake photo". */
+    private fun updatePhotoButton() {
+        val hasPhoto = photoTaken || !(editing?.photoName.isNullOrBlank())
+        (findViewById<View>(R.id.btnRetake) as MaterialButton).text = if (hasPhoto) "Retake photo" else "Take photo"
+        if (!hasPhoto && !hasLocation && editing == null) gpsStatus.text = "No photo yet. Tap Take photo when ready."
     }
 
     // ---------- helpers ----------
