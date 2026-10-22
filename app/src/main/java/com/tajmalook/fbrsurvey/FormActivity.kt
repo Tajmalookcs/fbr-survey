@@ -72,6 +72,8 @@ class FormActivity : AppCompatActivity() {
     private var lng = 0.0
     private var accuracy = 0f
     private var autoAddress: String? = null
+    /** a new photo was taken for an already-saved shop; applied on Save */
+    private var retakePending = false
     private lateinit var btnSave: MaterialButton
     private var useManualOnPhoto = false
     private lateinit var btnStampManual: MaterialButton
@@ -115,6 +117,7 @@ class FormActivity : AppCompatActivity() {
                 photoTaken = true
                 captureTime = System.currentTimeMillis()
                 showPreview()
+                val retake = markRetake()
                 if (data != null && data.hasExtra(CameraActivity.RES_LAT)) {
                     lat = data.getDoubleExtra(CameraActivity.RES_LAT, 0.0)
                     lng = data.getDoubleExtra(CameraActivity.RES_LNG, 0.0)
@@ -127,10 +130,11 @@ class FormActivity : AppCompatActivity() {
                         updateRealViews()
                     }
                     onLocation(null)
-                } else if (!hasLocation) {
-                    startLocation()
+                } else {
+                    if (retake) hasLocation = false   // new photo needs its own GPS fix
+                    if (!hasLocation) startLocation()
                 }
-            } else if (!photoTaken) {
+            } else if (!photoTaken && editing == null) {
                 finish() // cancelled the very first photo
             }
         }
@@ -141,8 +145,9 @@ class FormActivity : AppCompatActivity() {
                 photoTaken = true
                 captureTime = System.currentTimeMillis()
                 showPreview()
+                if (markRetake()) hasLocation = false
                 if (!hasLocation) startLocation()
-            } else if (!photoTaken) {
+            } else if (!photoTaken && editing == null) {
                 finish() // cancelled the very first photo
             }
         }
@@ -209,6 +214,7 @@ class FormActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.btnCopyPhone).setOnClickListener { copyAndOpenBrowser(inPhone) }
         gpsStatus.setOnClickListener { if (!hasLocation && editing == null) startLocation() }
 
+        findViewById<View>(R.id.btnRetake).setOnClickListener { openCamera() }
         val id = intent.getLongExtra(EXTRA_ID, -1L)
         if (id != -1L) {
             setupEdit(id)
@@ -224,7 +230,6 @@ class FormActivity : AppCompatActivity() {
             inArea.setText(prefs.getString("area", ""))
             inMarket.setText(prefs.getString("market", ""))
         }
-        findViewById<View>(R.id.btnRetake).setOnClickListener { openCamera() }
 
         if (savedInstanceState != null) {
             photoTaken = savedInstanceState.getBoolean("photoTaken")
@@ -288,7 +293,6 @@ class FormActivity : AppCompatActivity() {
         if (r == null) { finish(); return }
         editing = r
         title = "Edit record"
-        findViewById<View>(R.id.btnRetake).visibility = View.GONE
         inSurveyor.setText(r.surveyor)
         inFormation.setText(r.formation)
         inArea.setText(r.area)
@@ -436,6 +440,7 @@ class FormActivity : AppCompatActivity() {
         when {
             editing == null && !photoTaken -> return toast("Take the shop photo first")
             editing == null && !hasLocation -> return toast("Waiting for GPS location. Please wait or tap the GPS line to retry.")
+            retakePending && !hasLocation -> return toast("Waiting for GPS for the new photo. Please wait a moment.")
             name.isEmpty() -> { inName.error = "Required"; inName.requestFocus(); return }
             cnic.isNotEmpty() && cnicDigits.length != 13 -> { inCnic.error = "CNIC must have 13 digits"; inCnic.requestFocus(); return }
             phone.isNotEmpty() && phoneDigits.length !in 10..13 -> { inPhone.error = "Check phone number"; inPhone.requestFocus(); return }
@@ -476,7 +481,28 @@ class FormActivity : AppCompatActivity() {
             e.businessName = name; e.ownerName = owner; e.cnic = cnic; e.phone = phone
             e.address = address; e.fbrRegistered = fbr
             e.stampUseManual = useManualOnPhoto && address.isNotBlank()
+            val retake = retakePending
+            val nla = lat; val nln = lng; val nacc = accuracy; val ntime = captureTime
+            val nAddr = autoAddress.orEmpty(); val mf = mapFuture
             io.execute {
+                if (retake) try {
+                    // replace the photo: new clean copy, new map, new time + GPS of the new photo
+                    val mr = try {
+                        mf?.get(3, TimeUnit.SECONDS) ?: Geo.mapThumbResult(nla, nln, online = false)
+                    } catch (ex: Exception) {
+                        Geo.mapThumbResult(nla, nln, online = false)
+                    }
+                    val photo = Photo.loadUpright(captureFile)
+                    Store.rawPhoto(this, e.id).outputStream().use { photo.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                    photo.recycle()
+                    Store.mapFile(this, e.id).outputStream().use { mr.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    e.createdAt = ntime; e.lat = nla; e.lng = nln; e.accuracy = nacc
+                    e.mapAddress = nAddr; e.mapReal = mr.real
+                    captureFile.delete()
+                    runOnUiThread { retakePending = false }
+                } catch (ex: Throwable) {
+                    runOnUiThread { toast("Could not use the new photo: ${ex.message}") }
+                }
                 // quick: redraw with what we have now (no waiting for internet)
                 val res = Restamp.redraw(this, e)
                 runOnUiThread {
@@ -552,7 +578,6 @@ class FormActivity : AppCompatActivity() {
         editing = r
         title = "Edit record"
         initialCnic = r.cnic.filter { it.isDigit() }
-        findViewById<View>(R.id.btnRetake).visibility = View.GONE
         enableEditControls()
         updateRealViews()
     }
@@ -719,7 +744,7 @@ class FormActivity : AppCompatActivity() {
 
     /** Fills the read-only "real address" + "real coordinates" boxes and the photo-address button. */
     private fun updateRealViews() {
-        val e = editing
+        val e = if (retakePending) null else editing   // pending retake: show the new photo's GPS
         val la = e?.lat ?: lat
         val ln = e?.lng ?: lng
         val have = e != null || hasLocation
@@ -734,6 +759,15 @@ class FormActivity : AppCompatActivity() {
         }
         btnStampManual.text = if (useManualOnPhoto) "✓ Photo shows typed address (tap to use real address)"
             else "Use this address on photo"
+    }
+
+    /** Returns true if this photo replaces the photo of an already-saved shop. */
+    private fun markRetake(): Boolean {
+        if (editing == null) return false
+        retakePending = true
+        toast("New photo taken. Tap Save to replace the old photo.")
+        updateRealViews()
+        return true
     }
 
     // ---------- helpers ----------

@@ -7,7 +7,7 @@ import java.io.File
 
 data class Record(
     val id: Long,
-    val createdAt: Long,
+    var createdAt: Long,
     var surveyor: String,
     var formation: String,
     var area: String,
@@ -18,9 +18,9 @@ data class Record(
     var phone: String,
     var address: String,
     var fbrRegistered: Boolean,
-    val lat: Double,
-    val lng: Double,
-    val accuracy: Float,
+    var lat: Double,
+    var lng: Double,
+    var accuracy: Float,
     var photoUri: String,
     val photoName: String,
     var cnicNotProvided: Boolean = false,
