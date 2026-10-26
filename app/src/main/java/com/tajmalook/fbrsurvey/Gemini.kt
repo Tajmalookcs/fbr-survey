@@ -27,7 +27,8 @@ import kotlin.math.max
 object Gemini {
 
     sealed class Result {
-        data class Name(val name: String) : Result()
+        /** name and/or cell numbers read from the signboard */
+        data class Name(val name: String, val phones: List<String> = emptyList()) : Result()
         /** read from another GPS camera app's stamp; null = not found */
         data class StampData(val name: String, val lat: Double?, val lng: Double?, val time: Long?) : Result()
         object NoName : Result()
@@ -54,10 +55,13 @@ Read the shop's business name from its signboard. The signboard may be in Urdu o
 Give the name transliterated into English letters, in CAPITAL LETTERS, the way it is usually
 written in English in Pakistan (for example: ZAIN GENERAL STORE, MADINA KARYANA STORE,
 AL-SHIFA MEDICAL STORE, HAJI ZULFIQAR MACHINERY STORE).
-Ignore phone numbers, addresses, slogans, owner names written as contact persons,
+For the name, ignore phone numbers, addresses, slogans, owner names written as contact persons,
 product or brand advertisements (e.g. battery or drink brands), and any app stamp or text boxes.
 If no shop name is clearly readable, return an empty name.
-Reply with JSON only: {"name": "..."}"""
+Also list the shop's mobile / phone numbers written on the signboard or shop front (at most 4),
+digits only, e.g. "03001234567". Do not include numbers from a GPS app stamp or brand advertisements.
+If none are readable, return an empty list.
+Reply with JSON only: {"name": "...", "phones": ["..."]}"""
 
     private val pool = Executors.newCachedThreadPool()
 
@@ -91,8 +95,9 @@ Reply with JSON only: {"name": "..."}"""
 
         return when (val r = call(ctx, k, parts, json = true)) {
             is Raw.Ok -> {
-                val name = parseName(r.text)
-                if (name.isNullOrBlank()) Result.NoName else Result.Name(name)
+                val name = parseName(r.text).orEmpty()
+                val phones = parsePhones(r.text)
+                if (name.isBlank() && phones.isEmpty()) Result.NoName else Result.Name(name, phones)
             }
             is Raw.Fail -> r.result
         }
@@ -308,6 +313,25 @@ Reply with JSON only:
         }
         return raw.replace(Regex("\\s+"), " ").trim().uppercase(Locale.ENGLISH).take(80)
     }
+
+    /** Cell numbers from the reply, cleaned: 0300-1234567 / +92 300 1234567 → 03001234567. */
+    private fun parsePhones(text: String): List<String> {
+        val t = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val raw = mutableListOf<String>()
+        try {
+            val arr = JSONObject(t).optJSONArray("phones")
+            if (arr != null) for (i in 0 until arr.length()) raw += arr.optString(i)
+        } catch (e: Exception) { }
+        return cleanPhones(raw)
+    }
+
+    fun cleanPhones(raw: List<String>): List<String> = raw.mapNotNull { s ->
+        var d = s.filter { it.isDigit() }
+        if (d.startsWith("0092")) d = "0" + d.substring(4)
+        else if (d.startsWith("92") && d.length == 12) d = "0" + d.substring(2)
+        else if (d.length == 10 && d.startsWith("3")) d = "0$d"
+        d.takeIf { it.length in 10..13 }
+    }.distinct().take(4)
 
     private fun errMsg(json: String): String = try {
         JSONObject(json).getJSONObject("error").optString("message")

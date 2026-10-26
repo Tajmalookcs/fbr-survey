@@ -447,7 +447,7 @@ class MainActivity : AppCompatActivity() {
                         Xlsx.Cell(r.ownerName.uppercase(Locale.ENGLISH), Xlsx.LEFT),
                         Xlsx.Cell(r.address, Xlsx.LEFT),
                         Xlsx.Cell(if (r.cnicNotProvided) "Not provided" else r.cnic.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
-                        Xlsx.Cell(r.phone.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
+                        Xlsx.Cell(r.phone.lines().map { l -> l.filter { it.isDigit() } }.filter { it.isNotEmpty() }.joinToString("\n"), Xlsx.TEXT_LINES),
                         Xlsx.Cell(if (r.fbrRegistered) "Yes" else "No", Xlsx.CENTER),
                         Xlsx.Cell(if (r.shownTime() > 0) dayFmt.format(Date(r.shownTime())) else "", Xlsx.CENTER),
                         if (url.isEmpty()) Xlsx.Cell("", Xlsx.CENTER) else Xlsx.Cell(url, Xlsx.LINK, url),

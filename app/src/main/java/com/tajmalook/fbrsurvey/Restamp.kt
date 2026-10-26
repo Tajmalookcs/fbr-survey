@@ -73,7 +73,12 @@ object Restamp {
         val raw = Store.rawPhoto(ctx, r.id)
         if (!raw.exists()) return false
         return when (val res = Gemini.readName(ctx, raw)) {
-            is Gemini.Result.Name -> { r.businessName = res.name; true }
+            is Gemini.Result.Name -> {
+                var changed = false
+                if (res.name.isNotBlank()) { r.businessName = res.name; changed = true }
+                if (r.phone.isBlank() && res.phones.isNotEmpty()) { r.phone = res.phones.joinToString("\n"); changed = true }
+                changed
+            }
             Gemini.Result.NoName, Gemini.Result.NoKey, is Gemini.Result.BadKey -> false
             else -> null
         }

@@ -58,6 +58,8 @@ class FormActivity : AppCompatActivity() {
     private lateinit var inOwner: TextInputEditText
     private lateinit var inCnic: TextInputEditText
     private lateinit var inPhone: TextInputEditText
+    /** the 4 "Cell" boxes */
+    private lateinit var inPhones: List<TextInputEditText>
     private lateinit var cbNoCnic: android.widget.CheckBox
     private lateinit var inAddress: TextInputEditText
     private lateinit var rgFbr: RadioGroup
@@ -225,6 +227,7 @@ class FormActivity : AppCompatActivity() {
         inOwner = findViewById(R.id.inOwner)
         inCnic = findViewById(R.id.inCnic)
         inPhone = findViewById(R.id.inPhone)
+        inPhones = listOf(inPhone, findViewById(R.id.inPhone2), findViewById(R.id.inPhone3), findViewById(R.id.inPhone4))
         cbNoCnic = findViewById(R.id.cbNoCnic)
         cbNoCnic.setOnCheckedChangeListener { _, checked ->
             if (checked) { inCnic.setText(""); inCnic.error = null }
@@ -266,7 +269,9 @@ class FormActivity : AppCompatActivity() {
             }
         })
         findViewById<MaterialButton>(R.id.btnCheck).setOnClickListener { checkOnFbr() }
-        findViewById<MaterialButton>(R.id.btnCopyPhone).setOnClickListener { copyAndOpenBrowser(inPhone) }
+        listOf(R.id.btnCopyPhone, R.id.btnCopyPhone2, R.id.btnCopyPhone3, R.id.btnCopyPhone4).forEachIndexed { i, b ->
+            findViewById<MaterialButton>(b).setOnClickListener { copyAndOpenBrowser(inPhones[i]) }
+        }
         gpsStatus.setOnClickListener { if (!hasLocation && editing == null && !importMode) startLocation() }
 
         findViewById<View>(R.id.btnRetake).setOnClickListener { openCamera() }
@@ -384,7 +389,7 @@ class FormActivity : AppCompatActivity() {
         inOwner.setText(r.ownerName)
         initialCnic = r.cnic.filter { it.isDigit() }
         inCnic.setText(r.cnic)
-        inPhone.setText(r.phone)
+        setPhones(r.phone.lines())
         cbNoCnic.isChecked = r.cnicNotProvided
         inAddress.setText(r.address)
         useManualOnPhoto = r.stampUseManual
@@ -574,7 +579,7 @@ class FormActivity : AppCompatActivity() {
                     }
                     else -> stampNote = Gemini.message(res) + "\n⏳ You can save now; it will be read later when online."
                 }
-                if (inName.text.isNullOrBlank() && impSource != "pending") readNameFromBoard(force = false)
+                if ((inName.text.isNullOrBlank() || phonesEmpty()) && impSource != "pending") readNameFromBoard(force = false)
                 updateRealViews()
                 updateImportBox()
             }
@@ -714,18 +719,22 @@ class FormActivity : AppCompatActivity() {
         val name = inName.text?.toString()?.trim().orEmpty()
         val owner = inOwner.text?.toString()?.trim().orEmpty()
         val cnic = inCnic.text?.toString()?.trim().orEmpty()
-        val phone = inPhone.text?.toString()?.trim().orEmpty()
+        val phoneList = inPhones.map { it.text?.toString()?.trim().orEmpty() }
+        val phone = phoneList.filter { it.isNotEmpty() }.joinToString("\n")
         val address = inAddress.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
         val fbrId = rgFbr.checkedRadioButtonId
 
         val cnicDigits = cnic.filter { it.isDigit() }
-        val phoneDigits = phone.filter { it.isDigit() }
+        val badPhone = inPhones.firstOrNull { f ->
+            val t = f.text?.toString()?.trim().orEmpty()
+            t.isNotEmpty() && t.count { it.isDigit() } !in 10..13
+        }
         when {
             editing == null && photoTaken && !hasLocation && !importMode -> return toast("Waiting for GPS location. Please wait or tap the GPS line to retry.")
             retakePending && !hasLocation && !importMode -> return toast("Waiting for GPS for the new photo. Please wait a moment.")
             name.isEmpty() && !(hasAnyPhoto() && Gemini.hasKey(this)) -> { inName.error = "Required"; inName.requestFocus(); return }
             cnic.isNotEmpty() && cnicDigits.length != 13 -> { inCnic.error = "CNIC must have 13 digits"; inCnic.requestFocus(); return }
-            phone.isNotEmpty() && phoneDigits.length !in 10..13 -> { inPhone.error = "Check phone number"; inPhone.requestFocus(); return }
+            badPhone != null -> { badPhone.error = "Check cell number"; badPhone.requestFocus(); return }
             fbrId == -1 -> return toast("Select whether the shop is registered with FBR")
         }
         val fbr = fbrId == R.id.rbYes
@@ -999,6 +1008,7 @@ class FormActivity : AppCompatActivity() {
                         if (isFinishing || isDestroyed) return@runOnUiThread
                         if (inAddress.text.isNullOrBlank() && r.address.isNotBlank()) inAddress.setText(r.address)
                         if (inName.text.isNullOrBlank() && r.businessName.isNotBlank()) inName.setText(r.businessName)
+                        if (phonesEmpty() && r.phone.isNotBlank()) setPhones(r.phone.lines())
                         if (editing?.id == r.id && !retakePending) {
                             editing = r
                             if (r.isImported()) loadImportState(r)
@@ -1169,9 +1179,29 @@ class FormActivity : AppCompatActivity() {
 
     private fun hasAnyPhoto() = photoTaken || !(editing?.photoName.isNullOrBlank())
 
+    private fun phonesEmpty() = inPhones.all { it.text.isNullOrBlank() }
+
+    private fun setPhones(list: List<String>) {
+        val l = list.map { it.trim() }.filter { it.isNotEmpty() }
+        inPhones.forEachIndexed { i, f -> f.setText(l.getOrNull(i).orEmpty()) }
+    }
+
+    /** Puts numbers into empty Cell boxes only (never overwrites, skips numbers already there). Returns how many were added. */
+    private fun fillEmptyPhones(nums: List<String>): Int {
+        val have = inPhones.map { f -> f.text?.toString().orEmpty().filter { it.isDigit() } }.toMutableList()
+        var added = 0
+        for (n in nums) {
+            if (have.contains(n)) continue
+            val i = have.indexOfFirst { it.isEmpty() }
+            if (i < 0) break
+            inPhones[i].setText(n); have[i] = n; added++
+        }
+        return added
+    }
+
     /** Reads the business name from the signboard with Gemini (never overwrites a typed name unless forced). */
     private fun readNameFromBoard(force: Boolean) {
-        if (!force && !inName.text.isNullOrBlank()) return
+        if (!force && !inName.text.isNullOrBlank() && !phonesEmpty()) return
         if (!Gemini.hasKey(this)) {
             if (force) {
                 AlertDialog.Builder(this)
@@ -1188,7 +1218,7 @@ class FormActivity : AppCompatActivity() {
         }
         if (file == null || !file.exists()) { if (force) toast("Take the shop photo first"); return }
         nameNote.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
-        nameNote.text = "Reading name from signboard…"
+        nameNote.text = "Reading name and cell numbers from signboard…"
         if (io.isShutdown) return
         io.execute {
             val res = Gemini.readName(this, file)
@@ -1197,7 +1227,16 @@ class FormActivity : AppCompatActivity() {
                 nameNote.text = Gemini.message(res)
                 when (res) {
                     is Gemini.Result.Name -> {
-                        if (force || inName.text.isNullOrBlank()) inName.setText(res.name)
+                        if (res.name.isNotBlank() && (force || inName.text.isNullOrBlank())) inName.setText(res.name)
+                        val added = fillEmptyPhones(res.phones)
+                        nameNote.text = listOfNotNull(
+                            if (res.name.isNotBlank()) "✓ Name read from signboard" else "No shop name found on the board",
+                            when {
+                                added > 0 -> "✓ $added cell number(s) read: please check"
+                                res.phones.isEmpty() -> "No cell number on the board"
+                                else -> null
+                            },
+                        ).joinToString("\n")
                         nameNote.setTextColor(ContextCompat.getColor(this, R.color.green))
                     }
                     is Gemini.Result.Offline, Gemini.Result.Limit, Gemini.Result.Busy, Gemini.Result.Slow, Gemini.Result.NoName ->
