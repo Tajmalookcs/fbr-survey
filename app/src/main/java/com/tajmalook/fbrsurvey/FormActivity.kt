@@ -227,7 +227,7 @@ class FormActivity : AppCompatActivity() {
         inOwner = findViewById(R.id.inOwner)
         inCnic = findViewById(R.id.inCnic)
         inPhone = findViewById(R.id.inPhone)
-        inPhones = listOf(inPhone, findViewById(R.id.inPhone2), findViewById(R.id.inPhone3), findViewById(R.id.inPhone4))
+        inPhones = listOf(inPhone, findViewById<TextInputEditText>(R.id.inPhone2), findViewById<TextInputEditText>(R.id.inPhone3), findViewById<TextInputEditText>(R.id.inPhone4))
         cbNoCnic = findViewById(R.id.cbNoCnic)
         cbNoCnic.setOnCheckedChangeListener { _, checked ->
             if (checked) { inCnic.setText(""); inCnic.error = null }
