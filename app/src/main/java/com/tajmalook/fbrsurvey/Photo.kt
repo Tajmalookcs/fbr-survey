@@ -73,7 +73,92 @@ object Photo {
      *  - a semi-transparent black strip with the map thumbnail on the left and
      *    Plus Code + address, coordinates and date/time (yellow on black) on the right.
      */
+    /** Applies a crop spec "rot;l,t,r,b" (fractions of the rotated photo). Returns a new bitmap (or the same if none). */
+    fun applyCrop(src: Bitmap, spec: String): Bitmap {
+        if (spec.isBlank()) return src
+        return try {
+            val (rotS, rectS) = spec.split(";")
+            val rot = rotS.toFloat()
+            var b = src
+            if (rot != 0f) {
+                b = Bitmap.createBitmap(src, 0, 0, src.width, src.height, Matrix().apply { postRotate(rot) }, true)
+            }
+            val f = rectS.split(",").map { it.toFloat() }
+            val x = (f[0] * b.width).toInt().coerceIn(0, b.width - 1)
+            val y = (f[1] * b.height).toInt().coerceIn(0, b.height - 1)
+            val cw = ((f[2] - f[0]) * b.width).toInt().coerceIn(1, b.width - x)
+            val ch = ((f[3] - f[1]) * b.height).toInt().coerceIn(1, b.height - y)
+            val out = Bitmap.createBitmap(b, x, y, cw, ch)
+            val res = if (out.isMutable) out else out.copy(Bitmap.Config.ARGB_8888, true)
+            if (b != src && b != res) b.recycle()
+            if (src != res) src.recycle()
+            res
+        } catch (e: Exception) {
+            src
+        }
+    }
+
+    /** White details box (+ optional label line). */
+    private fun detailsBox(r: Record, unit: Float, boxTextW: Int, label: String?): List<StaticLayout> {
+        val dark = Color.rgb(25, 25, 25)
+        val boxTitle = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = dark
+            textSize = unit * 0.030f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val boxText = TextPaint(boxTitle).apply { textSize = unit * 0.026f; typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL) }
+        val boxLines = mutableListOf<StaticLayout>()
+        if (r.businessName.isNotBlank()) boxLines += layout("Business: ${r.businessName}", boxTitle, boxTextW, 2)
+        val ownerReg = android.text.SpannableStringBuilder()
+        if (r.ownerName.isNotBlank()) ownerReg.append("Owner: ${r.ownerName}  |  ")
+        val regStart = ownerReg.length
+        ownerReg.append(if (r.fbrRegistered) "Reg: YES" else "Reg: NO")
+        ownerReg.setSpan(android.text.style.StyleSpan(Typeface.BOLD), regStart, ownerReg.length, 0)
+        ownerReg.setSpan(android.text.style.ForegroundColorSpan(
+            if (r.fbrRegistered) Color.rgb(20, 140, 60) else Color.rgb(200, 30, 30)), regStart, ownerReg.length, 0)
+        boxLines += layout(ownerReg, boxText, boxTextW, 2)
+        val idLine = listOfNotNull(
+            if (r.cnicNotProvided) "CNIC: Not provided" else r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
+            r.phone.takeIf { it.isNotBlank() }?.let { "Ph: $it" },
+        ).joinToString("  |  ")
+        if (idLine.isNotEmpty()) boxLines += layout(idLine, boxText, boxTextW, 2)
+        if (label != null) {
+            val lp = TextPaint(boxText).apply {
+                textSize = unit * 0.022f; color = Color.rgb(90, 90, 90)
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.ITALIC)
+            }
+            boxLines += layout(label, lp, boxTextW, 1)
+        }
+        return boxLines
+    }
+
+    /**
+     * Imported photo (already has another app's stamp): only the white details box,
+     * placed at the TOP so it does not cover the original stamp, with an "Imported photo" label.
+     */
+    private fun stampImported(photo: Bitmap, r: Record): Bitmap {
+        val w = photo.width
+        val unit = min(w, photo.height).toFloat()
+        val pad = unit * 0.018f
+        val inner = unit * 0.014f
+        val lines = detailsBox(r, unit, (w - pad * 2 - inner * 2).toInt(), "Imported photo")
+        val gap = unit * 0.004f
+        val boxH = lines.sumOf { it.height } + gap * (lines.size - 1) + inner * 2
+        val contentW = lines.maxOf { l -> (0 until l.lineCount).maxOf { l.getLineWidth(it) } }
+        val boxW = min(contentW + inner * 2, w - pad * 2)
+        val c = Canvas(photo)
+        c.drawRoundRect(pad, pad, pad + boxW, pad + boxH, unit * 0.015f, unit * 0.015f,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 255, 255, 255) })
+        var y = pad + inner
+        for (l in lines) {
+            c.save(); c.translate(pad + inner, y); l.draw(c); c.restore()
+            y += l.height + gap
+        }
+        return photo
+    }
+
     fun stamp(photo: Bitmap, map: Bitmap, r: Record): Bitmap {
+        if (r.isImported()) return stampImported(photo, r)
         val w = photo.width
         val h = photo.height
         val unit = min(w, h).toFloat()

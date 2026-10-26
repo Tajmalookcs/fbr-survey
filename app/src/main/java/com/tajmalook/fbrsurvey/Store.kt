@@ -30,7 +30,27 @@ data class Record(
     var mapAddress: String = "",
     /** true = photo stamp shows the typed address instead of the real GPS address. */
     var stampUseManual: Boolean = false,
+    /** "camera" (app camera) | "stamp" / "photo" / "pending" (imported from gallery) */
+    var source: String = "camera",
+    /** imported photos: date/time read from the image (0 = not found) */
+    var photoTime: Long = 0L,
+    /** imported photos: coordinates typed/corrected by hand */
+    var coordsManual: Boolean = false,
+    /** crop of the clean photo: "rot;left,top,right,bottom" (fractions), "" = none */
+    var crop: String = "",
 ) {
+    fun isImported() = source == "stamp" || source == "photo" || source == "pending"
+
+    /** Date shown in list / Excel: imported photos use the date read from the image (0 = unknown). */
+    fun shownTime(): Long = if (isImported()) photoTime else createdAt
+
+    fun sourceLabel(): String = when (source) {
+        "stamp" -> "Imported (read from stamp)"
+        "photo" -> "Imported (photo data)"
+        "pending" -> "Imported (pending)"
+        else -> "App camera"
+    } + if (isImported() && coordsManual) " (coordinates entered manually)" else ""
+
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
         put("createdAt", createdAt)
@@ -54,6 +74,10 @@ data class Record(
         put("mapReal", mapReal)
         put("mapAddress", mapAddress)
         put("stampUseManual", stampUseManual)
+        put("source", source)
+        put("photoTime", photoTime)
+        put("coordsManual", coordsManual)
+        put("crop", crop)
     }
 
     companion object {
@@ -80,6 +104,10 @@ data class Record(
             mapReal = o.optBoolean("mapReal"),
             // older records: fall back to the form address once
             stampUseManual = o.optBoolean("stampUseManual"),
+            source = o.optString("source", "camera").ifBlank { "camera" },
+            photoTime = o.optLong("photoTime", 0L),
+            coordsManual = o.optBoolean("coordsManual"),
+            crop = o.optString("crop"),
             mapAddress = if (o.has("mapAddress")) o.optString("mapAddress") else o.optString("address"),
         )
     }

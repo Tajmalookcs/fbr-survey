@@ -87,6 +87,14 @@ class MainActivity : AppCompatActivity() {
         Bg.io.execute {
             var filled = 0
             try {
+                // imported photos still waiting: read coordinates / date / name from the stamp
+                for (r in Store.all(app).filter { it.source == "pending" }) {
+                    when (Restamp.fillImported(app, r)) {
+                        true -> { Restamp.fillFromSavedLocation(app, r); Restamp.redraw(app, r); filled++ }
+                        null -> break
+                        false -> {}
+                    }
+                }
                 for (r in Store.all(app).filter { it.businessName.isBlank() && it.photoName.isNotBlank() }) {
                     when (Restamp.fillNameFromBoard(app, r)) {
                         true -> { Restamp.redraw(app, r); filled++ }
@@ -99,7 +107,7 @@ class MainActivity : AppCompatActivity() {
             if (filled > 0) runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 refresh()
-                Toast.makeText(this, "Business name read from signboard for $filled shop(s) ✓", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Details read from photos for $filled shop(s) ✓", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -176,7 +184,7 @@ class MainActivity : AppCompatActivity() {
     // ---------- fill address / map for shops saved offline ----------
 
     private fun updateOfflineRecords() {
-        val todo = Store.all(this).filter { it.mapAddress.isBlank() || !it.mapReal || (it.businessName.isBlank() && it.photoName.isNotBlank()) }
+        val todo = Store.all(this).filter { it.mapAddress.isBlank() || !it.mapReal || it.source == "pending" || (it.businessName.isBlank() && it.photoName.isNotBlank()) }
         if (todo.isEmpty()) {
             AlertDialog.Builder(this).setMessage("All shops already have an address and map.").setPositiveButton("OK", null).show()
             return
@@ -194,7 +202,7 @@ class MainActivity : AppCompatActivity() {
                     updated++
                 }
             }
-            val left = Store.all(this).count { it.mapAddress.isBlank() || !it.mapReal || (it.businessName.isBlank() && it.photoName.isNotBlank()) }
+            val left = Store.all(this).count { it.mapAddress.isBlank() || !it.mapReal || it.source == "pending" || (it.businessName.isBlank() && it.photoName.isNotBlank()) }
             runOnUiThread {
                 progress.dismiss()
                 refresh()
@@ -279,13 +287,14 @@ class MainActivity : AppCompatActivity() {
         when (getSharedPreferences("app", MODE_PRIVATE).getString("startMode", "")) {
             "photo" -> openForm(detailsFirst = false)
             "details" -> openForm(detailsFirst = true)
+            "import" -> openImport()
             else -> {
                 val pad = (20 * resources.displayMetrics.density).toInt()
                 val remember = android.widget.CheckBox(this).apply { text = "Remember my choice" }
                 val box = android.widget.LinearLayout(this).apply { setPadding(pad, pad / 2, pad, 0); addView(remember) }
                 fun pick(mode: String) {
                     if (remember.isChecked) getSharedPreferences("app", MODE_PRIVATE).edit().putString("startMode", mode).apply()
-                    openForm(detailsFirst = mode == "details")
+                    if (mode == "import") openImport() else openForm(detailsFirst = mode == "details")
                 }
                 AlertDialog.Builder(this)
                     .setTitle("New survey")
@@ -293,6 +302,7 @@ class MainActivity : AppCompatActivity() {
                     .setView(box)
                     .setPositiveButton("📷 Photo first") { _, _ -> pick("photo") }
                     .setNegativeButton("📝 Details first") { _, _ -> pick("details") }
+                    .setNeutralButton("🖼 Import") { _, _ -> pick("import") }
                     .show()
             }
         }
@@ -302,10 +312,14 @@ class MainActivity : AppCompatActivity() {
         startActivity(Intent(this, FormActivity::class.java).putExtra(FormActivity.EXTRA_DETAILS_FIRST, detailsFirst))
     }
 
+    private fun openImport() {
+        startActivity(Intent(this, FormActivity::class.java).putExtra(FormActivity.EXTRA_IMPORT, true))
+    }
+
     private fun chooseStartMode() {
         val prefs = getSharedPreferences("app", MODE_PRIVATE)
-        val modes = arrayOf("photo", "details", "")
-        val labels = arrayOf("📷 Photo first", "📝 Details first", "Ask every time")
+        val modes = arrayOf("photo", "details", "import", "")
+        val labels = arrayOf("📷 Photo first", "📝 Details first", "🖼 Import from gallery", "Ask every time")
         val current = modes.indexOf(prefs.getString("startMode", "")).coerceAtLeast(0)
         AlertDialog.Builder(this)
             .setTitle("Start new survey with…")
@@ -370,7 +384,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "No records to export yet", Toast.LENGTH_SHORT).show(); return
         }
         val dayFmt = SimpleDateFormat("dd.MM.yyyy", Locale.ENGLISH)
-        val byDay = allRecords.groupBy { dayFmt.format(Date(it.createdAt)) }
+        val byDay = allRecords.groupBy { dayFmt.format(Date(it.shownTime().takeIf { t -> t > 0 } ?: it.createdAt)) }
         val days = byDay.keys.sortedByDescending { dayFmt.parse(it)?.time ?: 0L }
         val choices = days.map { "$it  (${byDay[it]!!.size} shops)" } + "All dates  (${allRecords.size} shops)"
 
@@ -401,7 +415,7 @@ class MainActivity : AppCompatActivity() {
                 val pos = spinner.selectedItemPosition
                 val day = days.getOrNull(pos)
                 val chosen = if (day != null) byDay[day]!! else allRecords
-                writeExcel(title, day, chosen.sortedBy { it.createdAt })
+                writeExcel(title, day, chosen.sortedBy { it.shownTime().takeIf { t -> t > 0 } ?: it.createdAt })
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -421,7 +435,7 @@ class MainActivity : AppCompatActivity() {
 
                 val header = listOf("Sr. No.", "Name of Field Formation", "Area", "Market Name", "Business Name",
                     "Name of Shopkeeper", "Business Address", "CNIC of Person Operating Shop", "Mobile Number",
-                    "Whether Registered or No", "Dated", "Google Location")
+                    "Whether Registered or No", "Dated", "Google Location", "Source")
                 val rows = data.mapIndexed { i, r ->
                     val url = if (r.lat == 0.0 && r.lng == 0.0) "" else "https://maps.google.com/?q=${r.lat},${r.lng}"
                     listOf(
@@ -435,11 +449,12 @@ class MainActivity : AppCompatActivity() {
                         Xlsx.Cell(if (r.cnicNotProvided) "Not provided" else r.cnic.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
                         Xlsx.Cell(r.phone.filter { it.isDigit() }, Xlsx.TEXT_CENTER),
                         Xlsx.Cell(if (r.fbrRegistered) "Yes" else "No", Xlsx.CENTER),
-                        Xlsx.Cell(dayFmt.format(Date(r.createdAt)), Xlsx.CENTER),
+                        Xlsx.Cell(if (r.shownTime() > 0) dayFmt.format(Date(r.shownTime())) else "", Xlsx.CENTER),
                         if (url.isEmpty()) Xlsx.Cell("", Xlsx.CENTER) else Xlsx.Cell(url, Xlsx.LINK, url),
+                        Xlsx.Cell(r.sourceLabel(), Xlsx.LEFT),
                     )
                 }
-                val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 42.0)
+                val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 42.0, 30.0)
                 file.outputStream().use {
                     val names = data.map { it.surveyor.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(", ")
                     Xlsx.writeReport(it, day ?: "Survey", title, "Survey Conducted by: $names", header, rows, widths)
@@ -500,8 +515,9 @@ class MainActivity : AppCompatActivity() {
             v.findViewById<TextView>(R.id.address).text =
                 r.address.ifBlank { String.format(Locale.ENGLISH, "%.5f, %.5f (address not entered)", r.lat, r.lng) }
             v.findViewById<TextView>(R.id.date).text =
-                (listOf(r.ownerName, dateFmt.format(Date(r.createdAt)), r.cnic) +
-                    (if (r.photoName.isBlank()) listOf("📷 No photo") else emptyList())).filter { it.isNotBlank() }.joinToString("  •  ")
+                (listOf(r.ownerName, if (r.shownTime() > 0) dateFmt.format(Date(r.shownTime())) else "", r.cnic) +
+                    (if (r.photoName.isBlank()) listOf("📷 No photo") else emptyList()) +
+                    (when (r.source) { "pending" -> listOf("⏳ Pending"); "stamp", "photo" -> listOf("🖼 Imported"); else -> emptyList() })).filter { it.isNotBlank() }.joinToString("  •  ")
 
             val status = v.findViewById<TextView>(R.id.status)
             status.text = if (r.fbrRegistered) "FBR ✓" else "Not reg."
@@ -511,7 +527,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val upd = v.findViewById<View>(R.id.btnRowUpdate)
-            upd.visibility = if (r.photoName.isNotBlank() && (r.mapAddress.isBlank() || !r.mapReal || r.businessName.isBlank())) View.VISIBLE else View.GONE
+            upd.visibility = if (r.photoName.isNotBlank() && (r.mapAddress.isBlank() || !r.mapReal || r.businessName.isBlank() || r.source == "pending")) View.VISIBLE else View.GONE
             upd.setOnClickListener { updateOne(r) }
 
             val img = v.findViewById<ImageView>(R.id.thumb)

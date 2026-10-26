@@ -16,7 +16,8 @@ object Restamp {
      * Coordinates, date and time are never changed. Returns true if anything new was found.
      */
     fun fillFromSavedLocation(ctx: Context, r: Record): Boolean {
-        var changed = fillNameFromBoard(ctx, r) == true
+        var changed = fillImported(ctx, r) == true
+        changed = (fillNameFromBoard(ctx, r) == true) || changed
         if (r.lat == 0.0 && r.lng == 0.0) return changed   // saved without GPS
         if (r.mapAddress.isBlank()) {
             Geo.address(ctx, r.lat, r.lng)?.let {
@@ -35,6 +36,30 @@ object Restamp {
             m.bitmap.recycle()
         }
         return changed
+    }
+
+    /**
+     * Imported photo still "pending": read coordinates / date (and name) from the stamp on the image.
+     * true = something filled, false = nothing to do, null = try again later.
+     */
+    fun fillImported(ctx: Context, r: Record): Boolean? {
+        if (r.source != "pending" || !Gemini.hasKey(ctx)) return false
+        val raw = Store.rawPhoto(ctx, r.id)
+        if (!raw.exists()) return false
+        return when (val res = Gemini.readStamp(ctx, raw)) {
+            is Gemini.Result.StampData -> {
+                var changed = false
+                if (res.lat != null && res.lng != null && !r.coordsManual && r.lat == 0.0 && r.lng == 0.0) {
+                    r.lat = res.lat; r.lng = res.lng; r.mapAddress = ""; changed = true
+                }
+                if (res.time != null && r.photoTime == 0L) { r.photoTime = res.time; changed = true }
+                if (res.name.isNotBlank() && r.businessName.isBlank()) { r.businessName = res.name; changed = true }
+                if (res.lat != null || res.time != null) r.source = "stamp"
+                changed
+            }
+            Gemini.Result.NoName, Gemini.Result.NoKey, is Gemini.Result.BadKey -> false
+            else -> null
+        }
     }
 
     /**
@@ -57,7 +82,7 @@ object Restamp {
         val raw = Store.rawPhoto(ctx, r.id)
         if (!raw.exists()) { Store.upsert(ctx, r); return Result.NO_ORIGINAL }
         return try {
-            val photo = Photo.loadUpright(raw)
+            val photo = Photo.applyCrop(Photo.loadUpright(raw), r.crop)
             val map = BitmapFactory.decodeFile(Store.mapFile(ctx, r.id).absolutePath)
                 ?: Geo.mapThumb(r.lat, r.lng, online = false)
             Photo.stamp(photo, map, r)

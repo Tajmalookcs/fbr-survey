@@ -28,6 +28,8 @@ object Gemini {
 
     sealed class Result {
         data class Name(val name: String) : Result()
+        /** read from another GPS camera app's stamp; null = not found */
+        data class StampData(val name: String, val lat: Double?, val lng: Double?, val time: Long?) : Result()
         object NoName : Result()
         object NoKey : Result()
         data class BadKey(val msg: String) : Result()
@@ -96,6 +98,56 @@ Reply with JSON only: {"name": "..."}"""
         }
     }
 
+    private const val STAMP_PROMPT = """This photo was taken with a GPS camera app. A stamp printed on the photo (usually at the
+bottom) shows the latitude, longitude and the date and time when the photo was taken.
+Read them EXACTLY as printed. Latitude is the north value (in Pakistan about 23 to 37),
+longitude is the east value (in Pakistan about 60 to 78). Never guess digits that are not printed.
+Also read the shop's business name from its signboard (Urdu or English), transliterated into English
+CAPITAL LETTERS the way it is usually written in Pakistan (e.g. ZAIN GENERAL STORE); ignore phone
+numbers, slogans, brand advertisements and the stamp text itself. If no shop name is readable, use "".
+Reply with JSON only:
+{"lat": number or null, "lng": number or null, "datetime": "YYYY-MM-DD HH:MM" (24-hour) or "", "name": "..."}"""
+
+    /** Reads coordinates, date/time and name from another app's stamp on an imported photo. */
+    fun readStamp(ctx: Context, photoFile: File): Result {
+        val k = key(ctx)
+        if (k.isEmpty()) return Result.NoKey
+        if (!photoFile.exists()) return Result.Error("Photo not found")
+        val b64 = encode(photoFile, 1600, 82) ?: return Result.Error("Could not open photo")
+        val parts = JSONArray()
+            .put(JSONObject().put("text", STAMP_PROMPT))
+            .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
+        return when (val r = call(ctx, k, parts, json = true, totalMs = 45_000L)) {
+            is Raw.Ok -> parseStamp(r.text)
+            is Raw.Fail -> r.result
+        }
+    }
+
+    private fun parseStamp(text: String): Result {
+        val t = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val o = try { JSONObject(t) } catch (e: Exception) { return Result.NoName }
+        val la = if (o.isNull("lat")) null else o.optDouble("lat", Double.NaN).takeIf { !it.isNaN() && it in -90.0..90.0 && it != 0.0 }
+        val ln = if (o.isNull("lng")) null else o.optDouble("lng", Double.NaN).takeIf { !it.isNaN() && it in -180.0..180.0 && it != 0.0 }
+        val time = o.optString("datetime").trim().takeIf { it.isNotEmpty() }?.let { d ->
+            try {
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ENGLISH).apply { isLenient = false }.parse(d)?.time
+            } catch (e: Exception) { null }
+        }
+        val name = o.optString("name").replace(Regex("\\s+"), " ").trim().uppercase(Locale.ENGLISH).take(80)
+        if (la == null && ln == null && time == null && name.isBlank()) return Result.NoName
+        return Result.StampData(name, if (la != null && ln != null) la else null, if (la != null && ln != null) ln else null, time)
+    }
+
+    private fun encode(file: File, maxSide: Int, quality: Int): String? {
+        val bmp = try { Photo.loadUpright(file, maxSide + 400) } catch (e: Exception) { return null }
+        val small = scaleDown(bmp, maxSide)
+        val out = ByteArrayOutputStream()
+        small.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        if (small != bmp) small.recycle()
+        bmp.recycle()
+        return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    }
+
     /** Checks that a key works (text-only request). Call off the main thread. */
     fun test(ctx: Context, k: String): Result {
         if (k.isBlank()) return Result.NoKey
@@ -108,6 +160,7 @@ Reply with JSON only: {"name": "..."}"""
 
     fun message(r: Result): String = when (r) {
         is Result.Name -> "✓ Read from signboard: please check"
+        is Result.StampData -> "✓ Read from image: please check"
         Result.NoName -> "No shop name found on the board"
         Result.NoKey -> "No Gemini key. Add it in ⋮ → Settings"
         is Result.BadKey -> "Gemini key not accepted: ${r.msg}"
@@ -144,18 +197,18 @@ Reply with JSON only: {"name": "..."}"""
         }
     }
 
-    private fun call(ctx: Context, k: String, parts: JSONArray, json: Boolean): Raw {
+    private fun call(ctx: Context, k: String, parts: JSONArray, json: Boolean, totalMs: Long = TOTAL_MS): Raw {
         val start = System.currentTimeMillis()
         var busy = false
         var limited = false
         var lastError: Raw? = null
         for (model in MODELS) {
-            val left = TOTAL_MS - (System.currentTimeMillis() - start)
+            val left = totalMs - (System.currentTimeMillis() - start)
             if (left < 2000) return Raw.Fail(Result.Slow)
             var r = timed(left) { callModel(ctx, k, model, body(parts, json, model, thinkingOff = true)) }
             // a model that does not accept the "no thinking" setting: ask again without it
             if (r is Raw.Fail && r.result is Result.Error && (r.result as Result.Error).msg.contains("thinking", true)) {
-                val left2 = TOTAL_MS - (System.currentTimeMillis() - start)
+                val left2 = totalMs - (System.currentTimeMillis() - start)
                 if (left2 < 2000) return Raw.Fail(Result.Slow)
                 r = timed(left2) { callModel(ctx, k, model, body(parts, json, model, thinkingOff = false)) }
             }
