@@ -878,7 +878,7 @@ class FormActivity : AppCompatActivity() {
                         if (force || inName.text.isNullOrBlank()) inName.setText(res.name)
                         nameNote.setTextColor(ContextCompat.getColor(this, R.color.green))
                     }
-                    is Gemini.Result.Offline, Gemini.Result.Limit, Gemini.Result.NoName ->
+                    is Gemini.Result.Offline, Gemini.Result.Limit, Gemini.Result.Busy, Gemini.Result.NoName ->
                         nameNote.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
                     else -> nameNote.setTextColor(ContextCompat.getColor(this, R.color.red))
                 }

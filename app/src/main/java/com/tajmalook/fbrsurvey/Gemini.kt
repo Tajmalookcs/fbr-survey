@@ -25,11 +25,16 @@ object Gemini {
         object NoKey : Result()
         data class BadKey(val msg: String) : Result()
         object Limit : Result()
+        object Busy : Result()
         data class Offline(val detail: String) : Result()
         data class Error(val msg: String) : Result()
     }
 
-    private val MODELS = listOf("gemini-flash-latest", "gemini-2.5-flash", "gemini-2.0-flash")
+    // tried in order; if one is busy / over its limit, the next one is used
+    private val MODELS = listOf(
+        "gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest",
+        "gemini-3.5-flash-lite", "gemini-2.5-flash-lite",
+    )
 
     private const val PROMPT = """This is a photo of a shop front in Pakistan, taken for a tax survey.
 Read the shop's business name from its signboard. The signboard may be in Urdu or English.
@@ -95,6 +100,7 @@ Reply with JSON only: {"name": "..."}"""
         Result.NoKey -> "No Gemini key. Add it in ⋮ → Settings"
         is Result.BadKey -> "Gemini key not accepted: ${r.msg}"
         Result.Limit -> "Gemini free limit reached. Will try again later"
+        Result.Busy -> "Gemini busy right now. Will try again later"
         is Result.Offline -> "Connection error: ${r.detail}"
         is Result.Error -> "Could not read name (${r.msg})"
     }
@@ -107,38 +113,57 @@ Reply with JSON only: {"name": "..."}"""
     }
 
     private fun call(k: String, body: JSONObject): Raw {
-        var last: Raw = Raw.Fail(Result.Error("No model available"))
-        for (model in MODELS) {
-            try {
-                val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
-                val conn = url.openConnection() as HttpURLConnection
-                conn.requestMethod = "POST"
-                conn.connectTimeout = 15000
-                conn.readTimeout = 45000
-                conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/json")
-                conn.setRequestProperty("x-goog-api-key", k)
-                conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-                val code = conn.responseCode
-                val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
-                    ?.bufferedReader()?.use { it.readText() }.orEmpty()
-                conn.disconnect()
+        // two passes over all models: busy / limited models are skipped, short wait between passes
+        for (pass in 0..1) {
+            var busy = false
+            var limited = false
+            var lastError: Raw? = null
+            for (model in MODELS) {
+                val r = callModel(k, model, body)
                 when {
-                    code in 200..299 -> return Raw.Ok(extractText(text))
-                    code == 404 -> { last = Raw.Fail(Result.Error("HTTP 404 model $model: ${errMsg(text)}")); continue }
-                    code == 429 -> return Raw.Fail(Result.Limit)
-                    code == 400 && text.contains("API_KEY", true) -> return Raw.Fail(Result.BadKey(errMsg(text)))
-                    code == 401 || code == 403 -> return Raw.Fail(Result.BadKey(errMsg(text)))
-                    code >= 500 -> return Raw.Fail(Result.Error("HTTP $code Gemini busy: ${errMsg(text)}"))
-                    else -> return Raw.Fail(Result.Error("HTTP $code: ${errMsg(text).ifBlank { text.take(200) }}"))
+                    r is Raw.Ok -> return r
+                    r is Raw.Fail && r.result is Result.Busy -> busy = true
+                    r is Raw.Fail && r.result is Result.Limit -> limited = true
+                    r is Raw.Fail && r.result is Result.Error && (r.result as Result.Error).msg.startsWith("HTTP 404") -> lastError = r
+                    else -> return r   // bad key, no connection, other error: no point trying other models
                 }
-            } catch (e: IOException) {
-                return Raw.Fail(Result.Offline("${e.javaClass.simpleName}: ${e.message ?: "no details"}"))
-            } catch (e: Exception) {
-                return Raw.Fail(Result.Error("${e.javaClass.simpleName}: ${e.message ?: "no details"}"))
             }
+            if (!busy && !limited) return lastError ?: Raw.Fail(Result.Error("No Gemini model available"))
+            if (pass == 0 && busy) { try { Thread.sleep(4000) } catch (e: InterruptedException) { } ; continue }
+            return Raw.Fail(if (busy) Result.Busy else Result.Limit)
         }
-        return last
+        return Raw.Fail(Result.Busy)
+    }
+
+    private fun callModel(k: String, model: String, body: JSONObject): Raw {
+        return try {
+            val url = URL("https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "POST"
+            conn.connectTimeout = 15000
+            conn.readTimeout = 45000
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "application/json")
+            conn.setRequestProperty("x-goog-api-key", k)
+            conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val text = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.use { it.readText() }.orEmpty()
+            conn.disconnect()
+            when {
+                code in 200..299 -> Raw.Ok(extractText(text))
+                code == 404 -> Raw.Fail(Result.Error("HTTP 404 model $model: ${errMsg(text)}"))
+                code == 429 -> Raw.Fail(Result.Limit)
+                code == 400 && text.contains("API_KEY", true) -> Raw.Fail(Result.BadKey(errMsg(text)))
+                code == 401 || code == 403 -> Raw.Fail(Result.BadKey(errMsg(text)))
+                code >= 500 -> Raw.Fail(Result.Busy)
+                else -> Raw.Fail(Result.Error("HTTP $code: ${errMsg(text).ifBlank { text.take(200) }}"))
+            }
+        } catch (e: IOException) {
+            Raw.Fail(Result.Offline("${e.javaClass.simpleName}: ${e.message ?: "no details"}"))
+        } catch (e: Exception) {
+            Raw.Fail(Result.Error("${e.javaClass.simpleName}: ${e.message ?: "no details"}"))
+        }
     }
 
     private fun extractText(json: String): String = try {
