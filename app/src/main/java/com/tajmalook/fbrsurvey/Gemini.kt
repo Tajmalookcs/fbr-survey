@@ -25,7 +25,7 @@ object Gemini {
         object NoKey : Result()
         data class BadKey(val msg: String) : Result()
         object Limit : Result()
-        object Offline : Result()
+        data class Offline(val detail: String) : Result()
         data class Error(val msg: String) : Result()
     }
 
@@ -93,9 +93,9 @@ Reply with JSON only: {"name": "..."}"""
         is Result.Name -> "✓ Read from signboard: please check"
         Result.NoName -> "No shop name found on the board"
         Result.NoKey -> "No Gemini key. Add it in ⋮ → Settings"
-        is Result.BadKey -> "Gemini key not accepted. Check it in ⋮ → Settings"
+        is Result.BadKey -> "Gemini key not accepted: ${r.msg}"
         Result.Limit -> "Gemini free limit reached. Will try again later"
-        Result.Offline -> "No internet. Name will be read when internet is back"
+        is Result.Offline -> "Connection error: ${r.detail}"
         is Result.Error -> "Could not read name (${r.msg})"
     }
 
@@ -125,17 +125,17 @@ Reply with JSON only: {"name": "..."}"""
                 conn.disconnect()
                 when {
                     code in 200..299 -> return Raw.Ok(extractText(text))
-                    code == 404 -> { last = Raw.Fail(Result.Error("model $model not found")); continue }
+                    code == 404 -> { last = Raw.Fail(Result.Error("HTTP 404 model $model: ${errMsg(text)}")); continue }
                     code == 429 -> return Raw.Fail(Result.Limit)
                     code == 400 && text.contains("API_KEY", true) -> return Raw.Fail(Result.BadKey(errMsg(text)))
                     code == 401 || code == 403 -> return Raw.Fail(Result.BadKey(errMsg(text)))
-                    code >= 500 -> return Raw.Fail(Result.Error("Gemini busy, try again"))
-                    else -> return Raw.Fail(Result.Error(errMsg(text).ifBlank { "HTTP $code" }))
+                    code >= 500 -> return Raw.Fail(Result.Error("HTTP $code Gemini busy: ${errMsg(text)}"))
+                    else -> return Raw.Fail(Result.Error("HTTP $code: ${errMsg(text).ifBlank { text.take(200) }}"))
                 }
             } catch (e: IOException) {
-                return Raw.Fail(Result.Offline)
+                return Raw.Fail(Result.Offline("${e.javaClass.simpleName}: ${e.message ?: "no details"}"))
             } catch (e: Exception) {
-                return Raw.Fail(Result.Error(e.message ?: "error"))
+                return Raw.Fail(Result.Error("${e.javaClass.simpleName}: ${e.message ?: "no details"}"))
             }
         }
         return last
