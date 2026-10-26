@@ -55,4 +55,7 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$camerax")
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
+    // Chrome network engine (QUIC) from Google Play Services, used for Gemini
+    implementation("com.google.android.gms:play-services-cronet:18.1.0")
+    implementation("org.chromium.net:cronet-api:119.6045.31")
 }

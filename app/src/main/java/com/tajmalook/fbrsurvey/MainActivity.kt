@@ -140,7 +140,7 @@ class MainActivity : AppCompatActivity() {
             val k = input.text.toString()
             result.text = "Testing…"
             Bg.io.execute {
-                val r = Gemini.test(k)
+                val r = Gemini.test(applicationContext, k)
                 runOnUiThread {
                     result.text = when (r) {
                         is Gemini.Result.Name -> "✓ Key works. Tap Save."
