@@ -24,7 +24,12 @@ jobs:
           gradle-version: "8.11.1"
 
       - name: Build release APK
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log || {
+            grep -E "^e: |error:|What went wrong" -A2 build.log | head -30 | while IFS= read -r l; do echo "::error::$l"; done
+            exit 1
+          }
 
       - name: Rename APK
         run: cp app/build/outputs/apk/release/app-release.apk FBR-Shop-Survey.apk
