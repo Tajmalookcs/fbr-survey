@@ -77,6 +77,7 @@ class FormActivity : AppCompatActivity() {
     private var retakePending = false
     /** New survey opened in 'Enter details first' mode (camera not opened automatically). */
     private var detailsFirst = false
+    private lateinit var nameNote: TextView
     private lateinit var btnSave: MaterialButton
     private var useManualOnPhoto = false
     private lateinit var btnStampManual: MaterialButton
@@ -120,6 +121,7 @@ class FormActivity : AppCompatActivity() {
                 photoTaken = true
                 captureTime = System.currentTimeMillis()
                 showPreview()
+                readNameFromBoard(force = false)
                 val retake = markRetake()
                 if (data != null && data.hasExtra(CameraActivity.RES_LAT)) {
                     lat = data.getDoubleExtra(CameraActivity.RES_LAT, 0.0)
@@ -149,6 +151,7 @@ class FormActivity : AppCompatActivity() {
                 photoTaken = true
                 captureTime = System.currentTimeMillis()
                 showPreview()
+                readNameFromBoard(force = false)
                 if (markRetake()) hasLocation = false
                 if (!hasLocation) startLocation()
             } else if (!photoTaken && editing == null && !detailsFirst) {
@@ -172,6 +175,8 @@ class FormActivity : AppCompatActivity() {
         inArea = findViewById(R.id.inArea)
         inMarket = findViewById(R.id.inMarket)
         inName = findViewById(R.id.inName)
+        nameNote = findViewById(R.id.nameNote)
+        findViewById<MaterialButton>(R.id.btnReadName).setOnClickListener { readNameFromBoard(force = true) }
         inOwner = findViewById(R.id.inOwner)
         inCnic = findViewById(R.id.inCnic)
         inPhone = findViewById(R.id.inPhone)
@@ -450,7 +455,7 @@ class FormActivity : AppCompatActivity() {
         when {
             editing == null && photoTaken && !hasLocation -> return toast("Waiting for GPS location. Please wait or tap the GPS line to retry.")
             retakePending && !hasLocation -> return toast("Waiting for GPS for the new photo. Please wait a moment.")
-            name.isEmpty() -> { inName.error = "Required"; inName.requestFocus(); return }
+            name.isEmpty() && !(hasAnyPhoto() && Gemini.hasKey(this)) -> { inName.error = "Required"; inName.requestFocus(); return }
             cnic.isNotEmpty() && cnicDigits.length != 13 -> { inCnic.error = "CNIC must have 13 digits"; inCnic.requestFocus(); return }
             phone.isNotEmpty() && phoneDigits.length !in 10..13 -> { inPhone.error = "Check phone number"; inPhone.requestFocus(); return }
             fbrId == -1 -> return toast("Select whether the shop is registered with FBR")
@@ -550,7 +555,7 @@ class FormActivity : AppCompatActivity() {
                     reloadPreview()
                     updatePhotoButton()
                 }
-                if (!e.mapReal || e.mapAddress.isBlank()) backgroundFill(e)
+                if (!e.mapReal || e.mapAddress.isBlank() || e.businessName.isBlank()) backgroundFill(e)
             }
             return
         }
@@ -623,7 +628,7 @@ class FormActivity : AppCompatActivity() {
                     toast("Saved ✓  Photo is in Gallery → ${Photo.ALBUM}")
                     switchToEdit(saved)
                 }
-                if (!saved.mapReal || saved.mapAddress.isBlank()) backgroundFill(saved)
+                if (!saved.mapReal || saved.mapAddress.isBlank() || saved.businessName.isBlank()) backgroundFill(saved)
             } catch (ex: Throwable) {
                 runOnUiThread {
                     progress.dismiss()
@@ -678,9 +683,10 @@ class FormActivity : AppCompatActivity() {
                     runOnUiThread {
                         if (isFinishing || isDestroyed) return@runOnUiThread
                         if (inAddress.text.isNullOrBlank() && r.address.isNotBlank()) inAddress.setText(r.address)
+                        if (inName.text.isNullOrBlank() && r.businessName.isNotBlank()) inName.setText(r.businessName)
                         updateRealViews()
                         reloadPreview()
-                        toast("Map/address updated from saved location ✓")
+                        toast("Updated from saved photo/location ✓")
                     }
                 }
             } catch (e: Throwable) { }
@@ -837,6 +843,47 @@ class FormActivity : AppCompatActivity() {
         val hasPhoto = photoTaken || !(editing?.photoName.isNullOrBlank())
         (findViewById<View>(R.id.btnRetake) as MaterialButton).text = if (hasPhoto) "Retake photo" else "Take photo"
         if (!hasPhoto && !hasLocation && editing == null) gpsStatus.text = "No photo yet. Tap Take photo when ready."
+    }
+
+    private fun hasAnyPhoto() = photoTaken || !(editing?.photoName.isNullOrBlank())
+
+    /** Reads the business name from the signboard with Gemini (never overwrites a typed name unless forced). */
+    private fun readNameFromBoard(force: Boolean) {
+        if (!force && !inName.text.isNullOrBlank()) return
+        if (!Gemini.hasKey(this)) {
+            if (force) {
+                AlertDialog.Builder(this)
+                    .setMessage("Add your free Gemini API key first:\nHome → ⋮ → Settings (Gemini key).")
+                    .setPositiveButton("OK", null).show()
+            }
+            return
+        }
+        // the clean photo: the new one (not yet saved) or the saved shop's clean copy
+        val file = when {
+            photoTaken && captureFile.exists() -> captureFile
+            editing != null -> Store.rawPhoto(this, editing!!.id)
+            else -> null
+        }
+        if (file == null || !file.exists()) { if (force) toast("Take the shop photo first"); return }
+        nameNote.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
+        nameNote.text = "Reading name from signboard…"
+        if (io.isShutdown) return
+        io.execute {
+            val res = Gemini.readName(this, file)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                nameNote.text = Gemini.message(res)
+                when (res) {
+                    is Gemini.Result.Name -> {
+                        if (force || inName.text.isNullOrBlank()) inName.setText(res.name)
+                        nameNote.setTextColor(ContextCompat.getColor(this, R.color.green))
+                    }
+                    Gemini.Result.Offline, Gemini.Result.Limit, Gemini.Result.NoName ->
+                        nameNote.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
+                    else -> nameNote.setTextColor(ContextCompat.getColor(this, R.color.red))
+                }
+            }
+        }
     }
 
     // ---------- helpers ----------

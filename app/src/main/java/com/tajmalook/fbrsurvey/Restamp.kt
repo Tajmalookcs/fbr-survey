@@ -16,8 +16,8 @@ object Restamp {
      * Coordinates, date and time are never changed. Returns true if anything new was found.
      */
     fun fillFromSavedLocation(ctx: Context, r: Record): Boolean {
-        if (r.lat == 0.0 && r.lng == 0.0) return false   // saved without GPS
-        var changed = false
+        var changed = fillNameFromBoard(ctx, r) == true
+        if (r.lat == 0.0 && r.lng == 0.0) return changed   // saved without GPS
         if (r.mapAddress.isBlank()) {
             Geo.address(ctx, r.lat, r.lng)?.let {
                 r.mapAddress = it                       // stamp address (real, from GPS)
@@ -35,6 +35,21 @@ object Restamp {
             m.bitmap.recycle()
         }
         return changed
+    }
+
+    /**
+     * Empty business name + photo + Gemini key: read the name from the signboard.
+     * true = name filled, false = nothing to do / no name on board, null = try again later.
+     */
+    fun fillNameFromBoard(ctx: Context, r: Record): Boolean? {
+        if (r.businessName.isNotBlank() || !Gemini.hasKey(ctx)) return false
+        val raw = Store.rawPhoto(ctx, r.id)
+        if (!raw.exists()) return false
+        return when (val res = Gemini.readName(ctx, raw)) {
+            is Gemini.Result.Name -> { r.businessName = res.name; true }
+            Gemini.Result.NoName, Gemini.Result.NoKey, is Gemini.Result.BadKey -> false
+            else -> null
+        }
     }
 
     /** Redraws the stamp on the clean copy and updates (or restores) the gallery photo. Saves the record. */

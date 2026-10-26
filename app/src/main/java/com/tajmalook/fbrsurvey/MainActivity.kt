@@ -34,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private var allRecords: List<Record> = emptyList()   // everything (stats, export)
     private var records: List<Record> = emptyList()      // shown in the list (search filter)
     private var query = ""
+    private val namePass = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var adapter: RecordAdapter
 
     private val importLauncher =
@@ -76,6 +77,78 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refresh()
+        catchUpNames()
+    }
+
+    /** Shops saved with an empty name: read it from the signboard in the background when possible. */
+    private fun catchUpNames() {
+        if (!Gemini.hasKey(this) || !namePass.compareAndSet(false, true)) return
+        val app = applicationContext
+        Bg.io.execute {
+            var filled = 0
+            try {
+                for (r in Store.all(app).filter { it.businessName.isBlank() && it.photoName.isNotBlank() }) {
+                    when (Restamp.fillNameFromBoard(app, r)) {
+                        true -> { Restamp.redraw(app, r); filled++ }
+                        null -> break        // offline or free limit: stop, try next time
+                        false -> {}
+                    }
+                }
+            } catch (e: Throwable) { }
+            namePass.set(false)
+            if (filled > 0) runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                refresh()
+                Toast.makeText(this, "Business name read from signboard for $filled shop(s) ✓", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun geminiSettings() {
+        val pad = (20 * resources.displayMetrics.density).toInt()
+        val info = TextView(this).apply {
+            text = android.text.Html.fromHtml(
+                "Used to read the shop name from the signboard photo.<br><br>" +
+                    "Get a free key (no card needed): <a href=\"https://aistudio.google.com/apikey\">aistudio.google.com/apikey</a> " +
+                    "→ Create API key → copy, then paste below.<br><br>The key is saved only on this phone.",
+                android.text.Html.FROM_HTML_MODE_LEGACY)
+            movementMethod = android.text.method.LinkMovementMethod.getInstance()
+        }
+        val input = android.widget.EditText(this).apply {
+            hint = "Paste Gemini API key"
+            setText(Gemini.key(this@MainActivity))
+            isSingleLine = true
+        }
+        val result = TextView(this).apply { setPadding(0, pad / 2, 0, 0) }
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+            addView(info); addView(input); addView(result)
+        }
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("Settings: Gemini key")
+            .setView(box)
+            .setPositiveButton("Save") { _, _ ->
+                Gemini.setKey(this, input.text.toString())
+                Toast.makeText(this, if (input.text.isBlank()) "Gemini key removed" else "Gemini key saved ✓", Toast.LENGTH_SHORT).show()
+                catchUpNames()
+            }
+            .setNeutralButton("Test", null)
+            .setNegativeButton("Cancel", null)
+            .show()
+        dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+            val k = input.text.toString()
+            result.text = "Testing…"
+            Bg.io.execute {
+                val r = Gemini.test(k)
+                runOnUiThread {
+                    result.text = when (r) {
+                        is Gemini.Result.Name -> "✓ Key works. Tap Save."
+                        else -> "✗ " + Gemini.message(r)
+                    }
+                }
+            }
+        }
     }
 
     private fun refresh() {
@@ -103,7 +176,7 @@ class MainActivity : AppCompatActivity() {
     // ---------- fill address / map for shops saved offline ----------
 
     private fun updateOfflineRecords() {
-        val todo = Store.all(this).filter { it.mapAddress.isBlank() || !it.mapReal }
+        val todo = Store.all(this).filter { it.mapAddress.isBlank() || !it.mapReal || (it.businessName.isBlank() && it.photoName.isNotBlank()) }
         if (todo.isEmpty()) {
             AlertDialog.Builder(this).setMessage("All shops already have an address and map.").setPositiveButton("OK", null).show()
             return
@@ -121,7 +194,7 @@ class MainActivity : AppCompatActivity() {
                     updated++
                 }
             }
-            val left = Store.all(this).count { it.mapAddress.isBlank() || !it.mapReal }
+            val left = Store.all(this).count { it.mapAddress.isBlank() || !it.mapReal || (it.businessName.isBlank() && it.photoName.isNotBlank()) }
             runOnUiThread {
                 progress.dismiss()
                 refresh()
@@ -179,6 +252,7 @@ class MainActivity : AppCompatActivity() {
         menu.add(0, 2, 1, "Import FBR data").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(0, 3, 2, "Update offline records").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(0, 4, 3, "Start new survey with…").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
+        menu.add(0, 5, 4, "Settings (Gemini key)").setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
         return true
     }
 
@@ -186,6 +260,7 @@ class MainActivity : AppCompatActivity() {
         if (item.itemId == 1) { showAbout(); return true }
         if (item.itemId == 3) { updateOfflineRecords(); return true }
         if (item.itemId == 4) { chooseStartMode(); return true }
+        if (item.itemId == 5) { geminiSettings(); return true }
         if (item.itemId == 2) {
             AlertDialog.Builder(this)
                 .setTitle("Import FBR data")
@@ -436,7 +511,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             val upd = v.findViewById<View>(R.id.btnRowUpdate)
-            upd.visibility = if (r.photoName.isNotBlank() && (r.mapAddress.isBlank() || !r.mapReal)) View.VISIBLE else View.GONE
+            upd.visibility = if (r.photoName.isNotBlank() && (r.mapAddress.isBlank() || !r.mapReal || r.businessName.isBlank())) View.VISIBLE else View.GONE
             upd.setOnClickListener { updateOne(r) }
 
             val img = v.findViewById<ImageView>(R.id.thumb)
