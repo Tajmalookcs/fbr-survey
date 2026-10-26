@@ -435,7 +435,7 @@ class MainActivity : AppCompatActivity() {
 
                 val header = listOf("Sr. No.", "Name of Field Formation", "Area", "Market Name", "Business Name",
                     "Name of Shopkeeper", "Business Address", "CNIC of Person Operating Shop", "Mobile Number",
-                    "Whether Registered or No", "Dated", "Google Location", "Source")
+                    "Whether Registered or No", "Dated", "Google Location")
                 val rows = data.mapIndexed { i, r ->
                     val url = if (r.lat == 0.0 && r.lng == 0.0) "" else "https://maps.google.com/?q=${r.lat},${r.lng}"
                     listOf(
@@ -451,10 +451,9 @@ class MainActivity : AppCompatActivity() {
                         Xlsx.Cell(if (r.fbrRegistered) "Yes" else "No", Xlsx.CENTER),
                         Xlsx.Cell(if (r.shownTime() > 0) dayFmt.format(Date(r.shownTime())) else "", Xlsx.CENTER),
                         if (url.isEmpty()) Xlsx.Cell("", Xlsx.CENTER) else Xlsx.Cell(url, Xlsx.LINK, url),
-                        Xlsx.Cell(r.sourceLabel(), Xlsx.LEFT),
                     )
                 }
-                val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 42.0, 30.0)
+                val widths = listOf(7.14, 20.86, 14.14, 15.29, 44.0, 25.29, 26.57, 17.86, 18.71, 15.86, 11.86, 42.0)
                 file.outputStream().use {
                     val names = data.map { it.surveyor.trim() }.filter { it.isNotEmpty() }.distinct().joinToString(", ")
                     Xlsx.writeReport(it, day ?: "Survey", title, "Survey Conducted by: $names", header, rows, widths)
