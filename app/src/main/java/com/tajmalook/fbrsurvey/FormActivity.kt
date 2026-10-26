@@ -97,20 +97,15 @@ class FormActivity : AppCompatActivity() {
     /** date/time read from the image (0 = not found); never typed by hand */
     private var impTime = 0L
     private var impTimeFrom = ""
-    private var coordsManual = false
-    /** coordinates found automatically (stamp / photo data); null = none */
-    private var autoLat: Double? = null
-    private var autoLng: Double? = null
-    /** coordinates from the Latitude/Longitude boxes, filled at Save (0 = none) */
-    private var formLat = 0.0
-    private var formLng = 0.0
+    private var coordsFrom = ""
+    /** the picked original photo (left untouched) */
+    private var pickedUri = ""
+    private var pickedName = ""
     private var stampNote: String? = null
     private var pendingCrop = ""
     private var wantCamera = false
     private lateinit var importBox: View
     private lateinit var tvImportDate: TextView
-    private lateinit var inLat: TextInputEditText
-    private lateinit var inLng: TextInputEditText
     private lateinit var tvCoordSource: TextView
 
     // ---------- launchers ----------
@@ -277,12 +272,9 @@ class FormActivity : AppCompatActivity() {
         findViewById<View>(R.id.btnRetake).setOnClickListener { openCamera() }
         importBox = findViewById(R.id.importBox)
         tvImportDate = findViewById(R.id.tvImportDate)
-        inLat = findViewById(R.id.inLat)
-        inLng = findViewById(R.id.inLng)
         tvCoordSource = findViewById(R.id.tvCoordSource)
         findViewById<View>(R.id.btnGallery).setOnClickListener { pickFromGallery() }
         findViewById<View>(R.id.btnCrop).setOnClickListener { openCrop() }
-        findViewById<View>(R.id.btnReadImage).setOnClickListener { readStampFromImage(manual = true) }
         val id = intent.getLongExtra(EXTRA_ID, -1L)
         if (id != -1L) {
             setupEdit(id)
@@ -316,11 +308,10 @@ class FormActivity : AppCompatActivity() {
             impSource = savedInstanceState.getString("impSource") ?: "camera"
             impTime = savedInstanceState.getLong("impTime")
             impTimeFrom = savedInstanceState.getString("impTimeFrom").orEmpty()
-            coordsManual = savedInstanceState.getBoolean("coordsManual")
+            coordsFrom = savedInstanceState.getString("coordsFrom").orEmpty()
+            pickedUri = savedInstanceState.getString("pickedUri").orEmpty()
+            pickedName = savedInstanceState.getString("pickedName").orEmpty()
             pendingCrop = savedInstanceState.getString("pendingCrop").orEmpty()
-            if (savedInstanceState.containsKey("autoLat")) {
-                autoLat = savedInstanceState.getDouble("autoLat"); autoLng = savedInstanceState.getDouble("autoLng")
-            }
             updateImportBox()
             if (photoTaken) showPreview()
             updatePhotoButton()
@@ -362,9 +353,10 @@ class FormActivity : AppCompatActivity() {
         outState.putString("impSource", impSource)
         outState.putLong("impTime", impTime)
         outState.putString("impTimeFrom", impTimeFrom)
-        outState.putBoolean("coordsManual", coordsManual)
+        outState.putString("coordsFrom", coordsFrom)
+        outState.putString("pickedUri", pickedUri)
+        outState.putString("pickedName", pickedName)
         outState.putString("pendingCrop", pendingCrop)
-        autoLat?.let { outState.putDouble("autoLat", it); outState.putDouble("autoLng", autoLng ?: 0.0) }
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -506,6 +498,7 @@ class FormActivity : AppCompatActivity() {
         val progress = ProgressDialog(this).apply { setMessage("Opening photo…"); setCancelable(false); show() }
         io.execute {
             val ex = try { Importer.copy(this, uri, captureFile) } catch (e: Exception) { null }
+            val dn = Importer.displayName(this, uri)
             runOnUiThread {
                 progress.dismiss()
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -516,110 +509,107 @@ class FormActivity : AppCompatActivity() {
                 }
                 photoTaken = true
                 importMode = true
+                pickedUri = uri.toString(); pickedName = dn
                 captureTime = System.currentTimeMillis()
                 pendingCrop = ""
-                coordsManual = false
-                autoLat = null; autoLng = null
                 impTime = ex.time ?: 0L
                 impTimeFrom = if (ex.time != null) "photo data" else ""
-                impSource = if (ex.lat != null || ex.time != null) "photo" else "pending"
                 hasLocation = false; lat = 0.0; lng = 0.0; accuracy = 0f
                 autoAddress = null; mapFuture = null
-                inLat.setText(""); inLng.setText("")
+                coordsFrom = ""
                 stampNote = null
-                if (ex.lat != null && ex.lng != null) setImportCoords(ex.lat, ex.lng)
+                if (ex.lat != null && ex.lng != null) { coordsFrom = "photo data"; setImportCoords(ex.lat, ex.lng) }
+                impSource = if (hasLocation && impTime > 0) "photo" else "pending"
                 showPreview()
                 markRetake()
                 updateRealViews()
                 updatePhotoButton()
                 updateImportBox()
-                if (!hasLocation) gpsStatus.text = "🖼 Imported photo  •  reading coordinates from the image…"
-                readStampFromImage(manual = false)
+                if (impSource == "pending") readStampFromImage()   // something missing: read it from the stamp
+                else readNameFromBoard(force = false)
             }
         }
     }
 
-    /** Coordinates found automatically (stamp or photo data). */
+    /** Coordinates found automatically (photo data or stamp). Never typed by hand. */
     private fun setImportCoords(la: Double, ln: Double) {
-        autoLat = la; autoLng = ln
-        inLat.setText(String.format(Locale.ENGLISH, "%.6f", la))
-        inLng.setText(String.format(Locale.ENGLISH, "%.6f", ln))
-        coordsManual = false
-        if (editing != null && !retakePending) return   // saved shop: applied on Save
         lat = la; lng = ln; accuracy = 0f
         hasLocation = true
         onLocation(null)
     }
 
-    /** Asks Gemini to read coordinates, date/time and name from the other app's stamp. */
-    private fun readStampFromImage(manual: Boolean) {
-        val file = cleanPhotoFile()
-        if (file == null) { if (manual) toast("No photo"); return }
+    /** Missing location/date in the photo data: Gemini reads them (and the name) from the stamp on the image. */
+    private fun readStampFromImage() {
+        val file = cleanPhotoFile() ?: return
         if (!Gemini.hasKey(this)) {
-            stampNote = "Add your Gemini key (Home → ⋮ → Settings) to read the stamp."
+            if (hasLocation || impTime > 0) impSource = "photo"
+            stampNote = "Not all details in the photo data. Add your Gemini key (Home → ⋮ → Settings) to read the stamp."
             updateImportBox(); return
         }
-        stampNote = "Reading coordinates, date and name from the image…"
+        stampNote = "Reading location and date from the stamp on the image…"
         updateImportBox()
         if (io.isShutdown) return
         io.execute {
             val res = Gemini.readStamp(this, file)
             runOnUiThread {
                 if (isFinishing || isDestroyed || !importMode) return@runOnUiThread
+                stampNote = null
                 when (res) {
                     is Gemini.Result.StampData -> {
-                        if (res.lat != null && res.lng != null) setImportCoords(res.lat, res.lng)
-                        if (res.time != null) { impTime = res.time; impTimeFrom = "stamp" }
-                        if (res.lat != null || res.time != null) impSource = "stamp"
-                        else if (impSource == "pending") impSource = "photo"
+                        var fromStamp = false
+                        if (!hasLocation && res.lat != null && res.lng != null) {
+                            coordsFrom = "stamp"; setImportCoords(res.lat, res.lng); fromStamp = true
+                        }
+                        if (impTime == 0L && res.time != null) { impTime = res.time; impTimeFrom = "stamp"; fromStamp = true }
+                        impSource = if (fromStamp) "stamp" else "photo"
                         if (res.name.isNotBlank() && inName.text.isNullOrBlank()) {
                             inName.setText(res.name)
                             nameNote.text = "✓ Read from image: please check"
                             nameNote.setTextColor(ContextCompat.getColor(this, R.color.green))
                         }
-                        stampNote = if (res.lat == null && res.time == null) "No coordinates or date found on the image"
-                            else Gemini.message(res)
                     }
-                    Gemini.Result.NoName -> {
-                        if (impSource == "pending") impSource = "photo"
-                        stampNote = "No coordinates or date found on the image"
+                    Gemini.Result.NoName -> impSource = "photo"
+                    Gemini.Result.NoKey, is Gemini.Result.BadKey -> {
+                        impSource = "photo"; stampNote = Gemini.message(res)
                     }
-                    else -> stampNote = Gemini.message(res) +
-                        if (impSource == "pending") "\n⏳ You can save now; it will be read later when online." else ""
+                    else -> stampNote = Gemini.message(res) + "\n⏳ You can save now; it will be read later when online."
                 }
-                if (!hasLocation && editing == null) gpsStatus.text = "🖼 Imported photo  •  no coordinates"
+                if (inName.text.isNullOrBlank() && impSource != "pending") readNameFromBoard(force = false)
                 updateRealViews()
                 updateImportBox()
             }
         }
     }
 
-    /** Shows/hides the imported-photo box (date read-only, coordinates editable). */
+    /** Shows the location/date found for an imported photo (read-only). */
     private fun updateImportBox() {
         importBox.visibility = if (importMode) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.btnCrop).visibility = if (importMode) View.GONE else View.VISIBLE
         if (!importMode) return
         val fmt = SimpleDateFormat("dd MMM yyyy hh:mm a", Locale.ENGLISH)
         tvImportDate.text = when {
-            impTime > 0 -> "Date & time: ${fmt.format(Date(impTime))} (read from ${impTimeFrom.ifBlank { "image" }})"
-            impSource == "pending" -> "Date & time: ⏳ will be read from the image"
-            else -> "Date not found on image"
+            impTime > 0 -> "🕒 ${fmt.format(Date(impTime))}  (${if (impTimeFrom == "stamp") "read from stamp" else "from photo data"})"
+            impSource == "pending" -> "🕒 Date: ⏳ will be read from the image"
+            else -> "🕒 Date not found in photo"
         }
-        val src = when {
-            coordsManual -> "Coordinates entered manually"
-            autoLat != null && impSource == "stamp" -> "Coordinates read from the stamp: please check (fix only if wrong)"
-            autoLat != null -> "Coordinates from the photo's own data (fix only if wrong)"
-            impSource == "pending" -> "⏳ Pending: coordinates will be read when online"
-            else -> "No coordinates found: enter them if you have them"
+        val e = if (retakePending) null else editing
+        val la = e?.lat ?: lat
+        val ln = e?.lng ?: lng
+        val loc = when {
+            !(la == 0.0 && ln == 0.0) -> String.format(Locale.ENGLISH, "📍 %.6f, %.6f  (%s)", la, ln,
+                if (coordsFrom == "stamp") "read from stamp" else "from photo data")
+            impSource == "pending" -> "📍 Location: ⏳ will be read from the image when online"
+            else -> "📍 Location not found in photo"
         }
-        tvCoordSource.text = listOfNotNull(stampNote, src).joinToString("\n")
+        tvCoordSource.text = listOfNotNull(loc, stampNote).joinToString("\n")
     }
 
     /** Leaves import mode when a camera photo replaces the imported one. Returns true if it was imported. */
     private fun leaveImportMode(): Boolean {
         val was = importMode
         importMode = false
-        impSource = "camera"; impTime = 0L; impTimeFrom = ""; coordsManual = false
-        autoLat = null; autoLng = null; stampNote = null
+        impSource = "camera"; impTime = 0L; impTimeFrom = ""; coordsFrom = ""
+        pickedUri = ""; pickedName = ""; stampNote = null
         pendingCrop = ""
         updateImportBox()
         return was
@@ -629,40 +619,10 @@ class FormActivity : AppCompatActivity() {
         importMode = r.isImported()
         impSource = r.source
         impTime = r.photoTime
-        impTimeFrom = when { r.photoTime == 0L -> ""; r.source == "stamp" -> "stamp"; else -> "photo data" }
-        coordsManual = r.coordsManual
-        val has = !(r.lat == 0.0 && r.lng == 0.0)
-        autoLat = if (has && !r.coordsManual) r.lat else null
-        autoLng = if (has && !r.coordsManual) r.lng else null
-        inLat.setText(if (has) String.format(Locale.ENGLISH, "%.6f", r.lat) else "")
-        inLng.setText(if (has) String.format(Locale.ENGLISH, "%.6f", r.lng) else "")
+        impTimeFrom = if (r.source == "stamp") "stamp" else "photo data"
+        coordsFrom = if (r.source == "stamp") "stamp" else "photo data"
         stampNote = null
         updateImportBox()
-    }
-
-    /** Reads the Latitude/Longitude boxes. false = invalid (error shown). */
-    private fun readImportFields(): Boolean {
-        val ts = inLat.text?.toString()?.trim().orEmpty()
-        val gs = inLng.text?.toString()?.trim().orEmpty()
-        if (ts.isEmpty() && gs.isEmpty()) {
-            formLat = 0.0; formLng = 0.0
-            coordsManual = false
-            return true
-        }
-        val la = ts.toDoubleOrNull()
-        val ln = gs.toDoubleOrNull()
-        if (la == null || la !in -90.0..90.0 || la == 0.0) { inLat.error = "Check latitude"; inLat.requestFocus(); return false }
-        if (ln == null || ln !in -180.0..180.0 || ln == 0.0) { inLng.error = "Check longitude"; inLng.requestFocus(); return false }
-        formLat = la; formLng = ln
-        val a = autoLat; val b = autoLng
-        coordsManual = a == null || b == null || kotlin.math.abs(a - la) > 1e-6 || kotlin.math.abs(b - ln) > 1e-6
-        if (editing == null || retakePending) {
-            if (kotlin.math.abs(lat - la) > 1e-6 || kotlin.math.abs(lng - ln) > 1e-6) {
-                autoAddress = null; mapFuture = null   // address will be found for the new coordinates
-            }
-            lat = la; lng = ln; accuracy = 0f; hasLocation = true
-        }
-        return true
     }
 
     // ---------- crop ----------
@@ -760,7 +720,6 @@ class FormActivity : AppCompatActivity() {
 
         val cnicDigits = cnic.filter { it.isDigit() }
         val phoneDigits = phone.filter { it.isDigit() }
-        if (importMode && !readImportFields()) return
         when {
             editing == null && photoTaken && !hasLocation && !importMode -> return toast("Waiting for GPS location. Please wait or tap the GPS line to retry.")
             retakePending && !hasLocation && !importMode -> return toast("Waiting for GPS for the new photo. Please wait a moment.")
@@ -824,17 +783,9 @@ class FormActivity : AppCompatActivity() {
             val hadPhoto = e.photoName.isNotBlank()
             val nla = lat; val nln = lng; val nacc = accuracy; val ntime = captureTime
             val nAddr = autoAddress.orEmpty(); val mf = mapFuture
-            val imp = importMode; val src = impSource; val pTime = impTime; val cm = coordsManual
-            val fLat = formLat; val fLng = formLng
-            e.crop = pendingCrop
-            if (!retake && imp && e.isImported()) {
-                if (kotlin.math.abs(fLat - e.lat) > 1e-7 || kotlin.math.abs(fLng - e.lng) > 1e-7) {
-                    e.lat = fLat; e.lng = fLng; e.mapAddress = ""
-                }
-                e.coordsManual = cm && !(fLat == 0.0 && fLng == 0.0)
-                e.source = src
-                e.photoTime = pTime
-            }
+            val imp = importMode; val src = impSource; val pTime = impTime
+            val pUri = pickedUri; val pName = pickedName
+            if (!imp) e.crop = pendingCrop
             io.execute {
                 if (retake) try {
                     // replace the photo: new clean copy, new map, new time + GPS of the new photo
@@ -843,18 +794,24 @@ class FormActivity : AppCompatActivity() {
                     } catch (ex: Exception) {
                         Geo.mapThumbResult(nla, nln, online = false)
                     }
-                    val photo = Photo.loadUpright(captureFile)
-                    Store.rawPhoto(this, e.id).outputStream().use { photo.compress(Bitmap.CompressFormat.JPEG, 90, it) }
-                    photo.recycle()
+                    if (imp) {
+                        captureFile.copyTo(Store.rawPhoto(this, e.id), overwrite = true)   // private copy for reading only
+                    } else {
+                        val photo = Photo.loadUpright(captureFile)
+                        Store.rawPhoto(this, e.id).outputStream().use { photo.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                        photo.recycle()
+                    }
                     Store.mapFile(this, e.id).outputStream().use { mr.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                     e.createdAt = ntime; e.lat = nla; e.lng = nln; e.accuracy = nacc
                     e.mapAddress = nAddr; e.mapReal = imp || mr.real
                     e.source = if (imp) src else "camera"
                     e.photoTime = if (imp) pTime else 0L
-                    e.coordsManual = imp && cm && !(nla == 0.0 && nln == 0.0)
+                    e.coordsManual = false
+                    e.crop = if (imp) "" else e.crop
                     // keep the old photo in the gallery: the new one is saved as a separate file
-                    e.photoUri = ""
-                    e.photoName = "FBR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ENGLISH).format(Date(ntime)) +
+                    e.photoUri = if (imp) pUri else ""
+                    e.photoName = if (imp) pName.ifBlank { "imported.jpg" } else
+                        "FBR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ENGLISH).format(Date(ntime)) +
                         "_" + Photo.safeFileName(name) + ".jpg"
                     captureFile.delete()
                     runOnUiThread { retakePending = false }
@@ -873,6 +830,7 @@ class FormActivity : AppCompatActivity() {
                             else -> "Saved ✓  Photo restored to Gallery → ${Photo.ALBUM}"
                         }
                         Restamp.Result.RESTAMPED -> "Saved ✓  Photo updated"
+                        Restamp.Result.IMPORTED -> if (retake) "Saved ✓  Imported photo attached (original unchanged)" else "Saved ✓"
                         else -> "Saved ✓"
                     })
                     reloadPreview()
@@ -912,7 +870,8 @@ class FormActivity : AppCompatActivity() {
         val la = if (hasLocation) lat else 0.0; val ln = if (hasLocation) lng else 0.0
         val acc = accuracy; val time = captureTime
         val imp = importMode; val src = impSource; val pTime = impTime
-        val cm = coordsManual && hasLocation; val crop = pendingCrop
+        val crop = if (importMode) "" else pendingCrop
+        val pUri = pickedUri; val pName = pickedName
         val noCnic = cbNoCnic.isChecked
         val useManual = useManualOnPhoto && address.isNotBlank()
         val stampAddr = autoAddress.orEmpty()   // real address from GPS, not the edited field
@@ -932,11 +891,26 @@ class FormActivity : AppCompatActivity() {
                     surveyor = surveyor, formation = formation, area = area, market = market,
                     cnicNotProvided = noCnic, mapReal = imp || mr.real, mapAddress = stampAddr, stampUseManual = useManual,
                     source = if (imp) src else "camera", photoTime = if (imp) pTime else 0L,
-                    coordsManual = imp && cm, crop = crop,
+                    crop = crop,
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
                     fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
-                    photoUri = "", photoName = fileName,
+                    photoUri = if (imp) pUri else "", photoName = if (imp) pName.ifBlank { "imported.jpg" } else fileName,
                 )
+
+                if (imp) {
+                    // imported photo already has its stamp: keep the original untouched, no new copy in the gallery
+                    captureFile.copyTo(Store.rawPhoto(this, time), overwrite = true)   // private copy for reading only
+                    Store.upsert(this, draft)
+                    captureFile.delete()
+                    runOnUiThread {
+                        progress.dismiss()
+                        btnSave.isEnabled = true
+                        toast("Saved ✓  Imported photo (original unchanged)")
+                        switchToEdit(draft)
+                    }
+                    if (draft.mapAddress.isBlank() || draft.businessName.isBlank() || draft.source == "pending") backgroundFill(draft)
+                    return@execute
+                }
 
                 val photo = Photo.loadUpright(captureFile)
                 // keep an unstamped copy + the map so the stamp can be redrawn after edits
@@ -983,6 +957,16 @@ class FormActivity : AppCompatActivity() {
     private fun enableEditControls() {
         preview.setOnClickListener {
             val r = editing ?: return@setOnClickListener
+            if (r.isImported()) {
+                val u = Uri.parse(r.photoUri)
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(u, "image/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                } catch (e: Exception) {
+                    try { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(u, "image/*")) }
+                    catch (e2: Exception) { toast("Open this photo from your Gallery: ${r.photoName}") }
+                }
+                return@setOnClickListener
+            }
             if (!Photo.galleryExists(this, Uri.parse(r.photoUri))) {
                 toast("Photo was deleted from the gallery. Tap Save to put it back."); return@setOnClickListener
             }

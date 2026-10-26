@@ -37,6 +37,12 @@ object Importer {
         return uri
     }
 
+    /** File name of the picked photo (for reference only). */
+    fun displayName(ctx: Context, uri: Uri): String = try {
+        ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { if (it.moveToFirst()) it.getString(0) else null }
+    } catch (e: Exception) { null } ?: (uri.lastPathSegment ?: "imported.jpg")
+
     fun readExif(file: File): Exif = try {
         val ex = ExifInterface(file.absolutePath)
         val ll = ex.latLong?.takeIf { !(it[0] == 0.0 && it[1] == 0.0) }

@@ -8,7 +8,7 @@ import android.net.Uri
 /** Fills missing address / real map from the SAVED coordinates and redraws the stamp. */
 object Restamp {
 
-    enum class Result { RESTAMPED, RESTORED, NO_ORIGINAL, FAILED }
+    enum class Result { RESTAMPED, RESTORED, NO_ORIGINAL, FAILED, IMPORTED }
 
     /**
      * Needs internet. Looks up the address (only if empty) and the real map (only if the
@@ -54,10 +54,12 @@ object Restamp {
                 }
                 if (res.time != null && r.photoTime == 0L) { r.photoTime = res.time; changed = true }
                 if (res.name.isNotBlank() && r.businessName.isBlank()) { r.businessName = res.name; changed = true }
-                if (res.lat != null || res.time != null) r.source = "stamp"
+                r.source = if (res.lat != null || res.time != null) "stamp" else "photo"
+                changed = true
                 changed
             }
-            Gemini.Result.NoName, Gemini.Result.NoKey, is Gemini.Result.BadKey -> false
+            Gemini.Result.NoName -> { r.source = "photo"; true }   // nothing on the image: stop waiting
+            Gemini.Result.NoKey, is Gemini.Result.BadKey -> false
             else -> null
         }
     }
@@ -79,6 +81,8 @@ object Restamp {
 
     /** Redraws the stamp on the clean copy and updates (or restores) the gallery photo. Saves the record. */
     fun redraw(ctx: Context, r: Record): Result {
+        // imported photo already has its own stamp: never draw on it or copy it to the gallery
+        if (r.isImported()) { Store.upsert(ctx, r); return Result.IMPORTED }
         val raw = Store.rawPhoto(ctx, r.id)
         if (!raw.exists()) { Store.upsert(ctx, r); return Result.NO_ORIGINAL }
         return try {
