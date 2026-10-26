@@ -133,23 +133,25 @@ object Photo {
     }
 
     /**
-     * Imported photo (already has another app's stamp): only the white details box,
-     * placed at the TOP so it does not cover the original stamp, with an "Imported photo" label.
+     * Imported photo (already has another app's stamp): only the white details box, at the
+     * bottom-left but raised by about a quarter of the photo height, so the other app's stamp stays visible.
      */
     private fun stampImported(photo: Bitmap, r: Record): Bitmap {
         val w = photo.width
         val unit = min(w, photo.height).toFloat()
         val pad = unit * 0.018f
         val inner = unit * 0.014f
-        val lines = detailsBox(r, unit, (w - pad * 2 - inner * 2).toInt(), "Imported photo")
+        val lines = detailsBox(r, unit, (w - pad * 2 - inner * 2).toInt(), null)
         val gap = unit * 0.004f
         val boxH = lines.sumOf { it.height } + gap * (lines.size - 1) + inner * 2
         val contentW = lines.maxOf { l -> (0 until l.lineCount).maxOf { l.getLineWidth(it) } }
         val boxW = min(contentW + inner * 2, w - pad * 2)
         val c = Canvas(photo)
-        c.drawRoundRect(pad, pad, pad + boxW, pad + boxH, unit * 0.015f, unit * 0.015f,
+        val bottom = photo.height * 0.75f                      // free space below for the other app's stamp
+        val top = max(pad, bottom - boxH)
+        c.drawRoundRect(pad, top, pad + boxW, top + boxH, unit * 0.015f, unit * 0.015f,
             Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 255, 255, 255) })
-        var y = pad + inner
+        var y = top + inner
         for (l in lines) {
             c.save(); c.translate(pad + inner, y); l.draw(c); c.restore()
             y += l.height + gap

@@ -818,9 +818,9 @@ class FormActivity : AppCompatActivity() {
                     e.coordsManual = false
                     e.crop = if (imp) "" else e.crop
                     // keep the old photo in the gallery: the new one is saved as a separate file
-                    e.photoUri = if (imp) pUri else ""
-                    e.photoName = if (imp) pName.ifBlank { "imported.jpg" } else
-                        "FBR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ENGLISH).format(Date(ntime)) +
+                    e.photoUri = ""                     // new gallery copy (imported: original stays untouched)
+                    e.origUri = if (imp) pUri else ""
+                    e.photoName = "FBR_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ENGLISH).format(Date(ntime)) +
                         "_" + Photo.safeFileName(name) + ".jpg"
                     captureFile.delete()
                     runOnUiThread { retakePending = false }
@@ -839,7 +839,6 @@ class FormActivity : AppCompatActivity() {
                             else -> "Saved ✓  Photo restored to Gallery → ${Photo.ALBUM}"
                         }
                         Restamp.Result.RESTAMPED -> "Saved ✓  Photo updated"
-                        Restamp.Result.IMPORTED -> if (retake) "Saved ✓  Imported photo attached (original unchanged)" else "Saved ✓"
                         else -> "Saved ✓"
                     })
                     reloadPreview()
@@ -903,19 +902,21 @@ class FormActivity : AppCompatActivity() {
                     crop = crop,
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
                     fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
-                    photoUri = if (imp) pUri else "", photoName = if (imp) pName.ifBlank { "imported.jpg" } else fileName,
+                    photoUri = "", photoName = fileName, origUri = if (imp) pUri else "",
                 )
 
                 if (imp) {
-                    // imported photo already has its stamp: keep the original untouched, no new copy in the gallery
-                    captureFile.copyTo(Store.rawPhoto(this, time), overwrite = true)   // private copy for reading only
-                    Store.upsert(this, draft)
+                    // original stays untouched: a copy with only the white details box goes to the gallery
+                    captureFile.copyTo(Store.rawPhoto(this, time), overwrite = true)
+                    val res = Restamp.redraw(this, draft)
                     captureFile.delete()
                     runOnUiThread {
                         progress.dismiss()
                         btnSave.isEnabled = true
-                        toast("Saved ✓  Imported photo (original unchanged)")
+                        toast(if (res == Restamp.Result.FAILED) "Saved ✓  (could not make the photo copy; tap Save again)"
+                            else "Saved ✓  Photo with details is in Gallery → ${Photo.ALBUM} (original unchanged)")
                         switchToEdit(draft)
+                        reloadPreview()
                     }
                     if (draft.mapAddress.isBlank() || draft.businessName.isBlank() || draft.source == "pending") backgroundFill(draft)
                     return@execute
@@ -966,16 +967,6 @@ class FormActivity : AppCompatActivity() {
     private fun enableEditControls() {
         preview.setOnClickListener {
             val r = editing ?: return@setOnClickListener
-            if (r.isImported()) {
-                val u = Uri.parse(r.photoUri)
-                try {
-                    startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(u, "image/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                } catch (e: Exception) {
-                    try { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(u, "image/*")) }
-                    catch (e2: Exception) { toast("Open this photo from your Gallery: ${r.photoName}") }
-                }
-                return@setOnClickListener
-            }
             if (!Photo.galleryExists(this, Uri.parse(r.photoUri))) {
                 toast("Photo was deleted from the gallery. Tap Save to put it back."); return@setOnClickListener
             }

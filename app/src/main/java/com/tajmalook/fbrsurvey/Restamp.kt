@@ -86,8 +86,6 @@ object Restamp {
 
     /** Redraws the stamp on the clean copy and updates (or restores) the gallery photo. Saves the record. */
     fun redraw(ctx: Context, r: Record): Result {
-        // imported photo already has its own stamp: never draw on it or copy it to the gallery
-        if (r.isImported()) { Store.upsert(ctx, r); return Result.IMPORTED }
         val raw = Store.rawPhoto(ctx, r.id)
         if (!raw.exists()) { Store.upsert(ctx, r); return Result.NO_ORIGINAL }
         return try {

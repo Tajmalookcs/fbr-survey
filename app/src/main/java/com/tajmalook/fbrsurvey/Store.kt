@@ -38,6 +38,8 @@ data class Record(
     var coordsManual: Boolean = false,
     /** crop of the clean photo: "rot;left,top,right,bottom" (fractions), "" = none */
     var crop: String = "",
+    /** imported photos: the original picked from the gallery (never changed) */
+    var origUri: String = "",
 ) {
     fun isImported() = source == "stamp" || source == "photo" || source == "pending"
 
@@ -78,10 +80,21 @@ data class Record(
         put("photoTime", photoTime)
         put("coordsManual", coordsManual)
         put("crop", crop)
+        put("origUri", origUri)
     }
 
     companion object {
-        fun fromJson(o: JSONObject) = Record(
+        fun fromJson(o: JSONObject) = parse(o).apply {
+            // imports saved by v1.0.33–v1.0.38 pointed at the original photo: make a separate copy instead
+            if (isImported() && !o.has("origUri") && photoUri.isNotBlank() && !photoName.startsWith("FBR_")) {
+                origUri = photoUri
+                photoUri = ""
+                photoName = "FBR_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.ENGLISH)
+                    .format(java.util.Date(id)) + "_" + Photo.safeFileName(businessName) + ".jpg"
+            }
+        }
+
+        private fun parse(o: JSONObject) = Record(
             id = o.getLong("id"),
             createdAt = o.getLong("createdAt"),
             surveyor = o.optString("surveyor"),
@@ -108,6 +121,7 @@ data class Record(
             photoTime = o.optLong("photoTime", 0L),
             coordsManual = o.optBoolean("coordsManual"),
             crop = o.optString("crop"),
+            origUri = o.optString("origUri"),
             mapAddress = if (o.has("mapAddress")) o.optString("mapAddress") else o.optString("address"),
         )
     }
