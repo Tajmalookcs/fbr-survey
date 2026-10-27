@@ -147,7 +147,9 @@ object Photo {
         val contentW = lines.maxOf { l -> (0 until l.lineCount).maxOf { l.getLineWidth(it) } }
         val boxW = min(contentW + inner * 2, w - pad * 2)
         val c = Canvas(photo)
-        val bottom = photo.height * 0.75f                      // free space below for the other app's stamp
+        // just above the other app's stamp (found automatically), else leave ~18% free at the bottom
+        val edge = stampTop(photo) ?: (photo.height * 0.82f)
+        val bottom = edge - photo.height * 0.01f
         val top = max(pad, bottom - boxH)
         c.drawRoundRect(pad, top, pad + boxW, top + boxH, unit * 0.015f, unit * 0.015f,
             Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 255, 255, 255) })
@@ -157,6 +159,39 @@ object Photo {
             y += l.height + gap
         }
         return photo
+    }
+
+    /**
+     * Finds the top edge of another app's dark stamp band at the bottom of the photo:
+     * a horizontal line where most of the width suddenly gets darker. Returns its y (photo pixels) or null.
+     */
+    fun stampTop(photo: Bitmap): Float? = try {
+        val sw = 200
+        val sh = (sw.toFloat() * photo.height / photo.width).toInt().coerceAtLeast(20)
+        val small = Bitmap.createScaledBitmap(photo, sw, sh, true)
+        val px = IntArray(sw * sh)
+        small.getPixels(px, 0, sw, 0, 0, sw, sh)
+        if (small != photo) small.recycle()
+        val lum = FloatArray(sw * sh) { i ->
+            val c = px[i]
+            0.299f * ((c shr 16) and 0xFF) + 0.587f * ((c shr 8) and 0xFF) + 0.114f * (c and 0xFF)
+        }
+        var bestY = -1
+        var bestFrac = 0f
+        for (y in (sh * 0.55f).toInt() until (sh * 0.95f).toInt()) {
+            if (y < 3 || y + 3 > sh) continue
+            var hits = 0
+            for (x in 0 until sw) {
+                var up = 0f; var dn = 0f
+                for (k in 1..3) { up += lum[(y - k) * sw + x]; dn += lum[(y + k - 1) * sw + x] }
+                if ((up - dn) / 3f > 12f) hits++
+            }
+            val frac = hits.toFloat() / sw
+            if (frac > bestFrac) { bestFrac = frac; bestY = y }
+        }
+        if (bestY > 0 && bestFrac >= 0.8f) bestY.toFloat() * photo.height / sh else null
+    } catch (e: Throwable) {
+        null
     }
 
     fun stamp(photo: Bitmap, map: Bitmap, r: Record): Bitmap {
