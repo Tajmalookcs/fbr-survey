@@ -40,7 +40,15 @@ data class Record(
     var crop: String = "",
     /** imported photos: the original picked from the gallery (never changed) */
     var origUri: String = "",
+    /** which Cell number (0 = first) is shown in the photo's white box */
+    var stampPhone: Int = 0,
 ) {
+    /** the number shown on the photo: the chosen one, else the first */
+    fun stampPhoneNumber(): String? {
+        val l = phone.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        return l.getOrNull(stampPhone) ?: l.firstOrNull()
+    }
+
     fun isImported() = source == "stamp" || source == "photo" || source == "pending"
 
     /** Date shown in list / Excel: imported photos use the date read from the image (0 = unknown). */
@@ -81,6 +89,7 @@ data class Record(
         put("coordsManual", coordsManual)
         put("crop", crop)
         put("origUri", origUri)
+        put("stampPhone", stampPhone)
     }
 
     companion object {
@@ -122,6 +131,7 @@ data class Record(
             coordsManual = o.optBoolean("coordsManual"),
             crop = o.optString("crop"),
             origUri = o.optString("origUri"),
+            stampPhone = o.optInt("stampPhone", 0),
             mapAddress = if (o.has("mapAddress")) o.optString("mapAddress") else o.optString("address"),
         )
     }

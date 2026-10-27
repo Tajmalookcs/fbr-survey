@@ -119,7 +119,7 @@ object Photo {
         boxLines += layout(ownerReg, boxText, boxTextW, 2)
         val idLine = listOfNotNull(
             if (r.cnicNotProvided) "CNIC: Not provided" else r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
-            r.phone.lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() }?.let { "Cell: $it" },
+            r.stampPhoneNumber()?.let { "Cell: $it" },
         ).joinToString("  |  ")
         if (idLine.isNotEmpty()) boxLines += layout(idLine, boxText, boxTextW, 2)
         if (label != null) {
@@ -254,7 +254,7 @@ object Photo {
 
         val idLine = listOfNotNull(
             if (r.cnicNotProvided) "CNIC: Not provided" else r.cnic.takeIf { it.isNotBlank() }?.let { "CNIC: $it" },
-            r.phone.lineSequence().map { it.trim() }.firstOrNull { it.isNotBlank() }?.let { "Cell: $it" },
+            r.stampPhoneNumber()?.let { "Cell: $it" },
         ).joinToString("  |  ")
         if (idLine.isNotEmpty()) boxLines += layout(idLine, boxText, boxTextW, 2)
         val boxGap = unit * 0.004f

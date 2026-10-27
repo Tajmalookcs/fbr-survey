@@ -60,6 +60,11 @@ class FormActivity : AppCompatActivity() {
     private lateinit var inPhone: TextInputEditText
     /** the 4 "Cell" boxes */
     private lateinit var inPhones: List<TextInputEditText>
+    private lateinit var rbCells: List<android.widget.RadioButton>
+    /** Cell box chosen for the photo (0 = first) */
+    private var selPhone = 0
+    /** chosen number's position among the filled numbers, worked out at Save */
+    private var stampIdx = 0
     private lateinit var cbNoCnic: android.widget.CheckBox
     private lateinit var inAddress: TextInputEditText
     private lateinit var rgFbr: RadioGroup
@@ -269,6 +274,9 @@ class FormActivity : AppCompatActivity() {
             }
         })
         findViewById<MaterialButton>(R.id.btnCheck).setOnClickListener { checkOnFbr() }
+        rbCells = listOf(R.id.rbCell1, R.id.rbCell2, R.id.rbCell3, R.id.rbCell4).map { findViewById(it) }
+        rbCells.forEachIndexed { i, rb -> rb.setOnClickListener { selPhone = i; updateCellRadios() } }
+        updateCellRadios()
         listOf(R.id.btnCopyPhone, R.id.btnCopyPhone2, R.id.btnCopyPhone3, R.id.btnCopyPhone4).forEachIndexed { i, b ->
             findViewById<MaterialButton>(b).setOnClickListener { copyAndOpenBrowser(inPhones[i]) }
         }
@@ -390,6 +398,8 @@ class FormActivity : AppCompatActivity() {
         initialCnic = r.cnic.filter { it.isDigit() }
         inCnic.setText(r.cnic)
         setPhones(r.phone.lines())
+        selPhone = r.stampPhone.coerceIn(0, 3)
+        updateCellRadios()
         cbNoCnic.isChecked = r.cnicNotProvided
         inAddress.setText(r.address)
         useManualOnPhoto = r.stampUseManual
@@ -721,6 +731,8 @@ class FormActivity : AppCompatActivity() {
         val cnic = inCnic.text?.toString()?.trim().orEmpty()
         val phoneList = inPhones.map { it.text?.toString()?.trim().orEmpty() }
         val phone = phoneList.filter { it.isNotEmpty() }.joinToString("\n")
+        stampIdx = if (phoneList.getOrNull(selPhone).isNullOrEmpty()) 0
+            else phoneList.take(selPhone).count { it.isNotEmpty() }
         val address = inAddress.text?.toString()?.trim()?.replace(Regex("\\s+"), " ").orEmpty()
         val fbrId = rgFbr.checkedRadioButtonId
 
@@ -786,6 +798,7 @@ class FormActivity : AppCompatActivity() {
             e.cnicNotProvided = cbNoCnic.isChecked
             e.surveyor = surveyor; e.formation = formation; e.area = area; e.market = market
             e.businessName = name; e.ownerName = owner; e.cnic = cnic; e.phone = phone
+            e.stampPhone = stampIdx
             e.address = address; e.fbrRegistered = fbr
             e.stampUseManual = useManualOnPhoto && address.isNotBlank()
             val retake = retakePending
@@ -861,7 +874,7 @@ class FormActivity : AppCompatActivity() {
                 fbrRegistered = fbr,
                 lat = if (hasLocation) lat else 0.0, lng = if (hasLocation) lng else 0.0,
                 accuracy = if (hasLocation) accuracy else 0f,
-                photoUri = "", photoName = "",
+                photoUri = "", photoName = "", stampPhone = stampIdx,
             )
             io.execute {
                 Store.upsert(this, rec)
@@ -902,7 +915,7 @@ class FormActivity : AppCompatActivity() {
                     crop = crop,
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
                     fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
-                    photoUri = "", photoName = fileName, origUri = if (imp) pUri else "",
+                    photoUri = "", photoName = fileName, origUri = if (imp) pUri else "", stampPhone = stampIdx,
                 )
 
                 if (imp) {
@@ -1169,6 +1182,10 @@ class FormActivity : AppCompatActivity() {
     }
 
     private fun hasAnyPhoto() = photoTaken || !(editing?.photoName.isNullOrBlank())
+
+    private fun updateCellRadios() {
+        rbCells.forEachIndexed { i, rb -> rb.isChecked = i == selPhone }
+    }
 
     private fun phonesEmpty() = inPhones.all { it.text.isNullOrBlank() }
 
