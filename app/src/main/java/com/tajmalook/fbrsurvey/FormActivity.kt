@@ -65,6 +65,10 @@ class FormActivity : AppCompatActivity() {
     private var selPhone = 0
     /** chosen number's position among the filled numbers, worked out at Save */
     private var stampIdx = 0
+    /** Owner box was filled from the signboard (FBR data may replace it) */
+    private var ownerFromBoard = false
+    /** true while the app itself fills a box (so the "check" note is not cleared) */
+    private var boardFilling = false
     private lateinit var cbNoCnic: android.widget.CheckBox
     private lateinit var inAddress: TextInputEditText
     private lateinit var rgFbr: RadioGroup
@@ -230,6 +234,15 @@ class FormActivity : AppCompatActivity() {
         nameNote = findViewById(R.id.nameNote)
         findViewById<MaterialButton>(R.id.btnReadName).setOnClickListener { readNameFromBoard(force = true) }
         inOwner = findViewById(R.id.inOwner)
+        inOwner.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                if (boardFilling) return
+                ownerFromBoard = false
+                clearBoardNote(inOwner)
+            }
+        })
         inCnic = findViewById(R.id.inCnic)
         inPhone = findViewById(R.id.inPhone)
         inPhones = listOf(inPhone, findViewById<TextInputEditText>(R.id.inPhone2), findViewById<TextInputEditText>(R.id.inPhone3), findViewById<TextInputEditText>(R.id.inPhone4))
@@ -274,6 +287,13 @@ class FormActivity : AppCompatActivity() {
             }
         })
         findViewById<MaterialButton>(R.id.btnCheck).setOnClickListener { checkOnFbr() }
+        inPhones.forEach { f ->
+            f.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+                override fun afterTextChanged(s: Editable?) { if (!boardFilling) clearBoardNote(f) }
+            })
+        }
         rbCells = listOf(R.id.rbCell1, R.id.rbCell2, R.id.rbCell3, R.id.rbCell4).map { findViewById(it) }
         rbCells.forEachIndexed { i, rb -> rb.setOnClickListener { selPhone = i; updateCellRadios() } }
         updateCellRadios()
@@ -394,7 +414,10 @@ class FormActivity : AppCompatActivity() {
         inArea.setText(r.area)
         inMarket.setText(r.market)
         inName.setText(r.businessName)
+        boardFilling = true
         inOwner.setText(r.ownerName)
+        boardFilling = false
+        ownerFromBoard = r.ownerFromBoard
         initialCnic = r.cnic.filter { it.isDigit() }
         inCnic.setText(r.cnic)
         setPhones(r.phone.lines())
@@ -751,6 +774,7 @@ class FormActivity : AppCompatActivity() {
         }
         val fbr = fbrId == R.id.rbYes
 
+        (inPhones + inOwner).forEach { clearBoardNote(it) }
         val proceed = { saveAfterChecks(surveyor, formation, area, market, name, owner, cnic, phone, address, fbr, cnicDigits) }
         val noPhotoYet = !photoTaken && (editing == null || editing?.photoName.isNullOrBlank())
         if (noPhotoYet && !retakePending) {
@@ -799,6 +823,7 @@ class FormActivity : AppCompatActivity() {
             e.surveyor = surveyor; e.formation = formation; e.area = area; e.market = market
             e.businessName = name; e.ownerName = owner; e.cnic = cnic; e.phone = phone
             e.stampPhone = stampIdx
+            e.ownerFromBoard = ownerFromBoard && owner.isNotBlank()
             e.address = address; e.fbrRegistered = fbr
             e.stampUseManual = useManualOnPhoto && address.isNotBlank()
             val retake = retakePending
@@ -874,7 +899,7 @@ class FormActivity : AppCompatActivity() {
                 fbrRegistered = fbr,
                 lat = if (hasLocation) lat else 0.0, lng = if (hasLocation) lng else 0.0,
                 accuracy = if (hasLocation) accuracy else 0f,
-                photoUri = "", photoName = "", stampPhone = stampIdx,
+                photoUri = "", photoName = "", stampPhone = stampIdx, ownerFromBoard = ownerFromBoard && owner.isNotBlank(),
             )
             io.execute {
                 Store.upsert(this, rec)
@@ -916,6 +941,7 @@ class FormActivity : AppCompatActivity() {
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
                     fbrRegistered = fbr, lat = la, lng = ln, accuracy = acc,
                     photoUri = "", photoName = fileName, origUri = if (imp) pUri else "", stampPhone = stampIdx,
+                    ownerFromBoard = ownerFromBoard && owner.isNotBlank(),
                 )
 
                 if (imp) {
@@ -1013,6 +1039,10 @@ class FormActivity : AppCompatActivity() {
                         if (inAddress.text.isNullOrBlank() && r.address.isNotBlank()) inAddress.setText(r.address)
                         if (inName.text.isNullOrBlank() && r.businessName.isNotBlank()) inName.setText(r.businessName)
                         if (phonesEmpty() && r.phone.isNotBlank()) setPhones(r.phone.lines())
+                        if (inOwner.text.isNullOrBlank() && r.ownerName.isNotBlank()) {
+                            boardFilling = true; inOwner.setText(r.ownerName); boardFilling = false
+                            ownerFromBoard = r.ownerFromBoard
+                        }
                         if (editing?.id == r.id && !retakePending) {
                             editing = r
                             if (r.isImported()) loadImportState(r)
@@ -1067,7 +1097,10 @@ class FormActivity : AppCompatActivity() {
                         fbrStatus.setTextColor(ContextCompat.getColor(this, R.color.green))
                         if (auto) {
                             rgFbr.check(R.id.rbYes)
-                            if (res.name.isNotBlank() && inOwner.text.isNullOrBlank()) inOwner.setText(res.name)
+                            if (res.name.isNotBlank() && (inOwner.text.isNullOrBlank() || ownerFromBoard)) {
+                                inOwner.setText(res.name)   // FBR name is more reliable than the signboard
+                                ownerFromBoard = false
+                            }
                             // business name only if FBR has one; otherwise the field stays empty
                             if (res.business.isNotBlank() && inName.text.isNullOrBlank()) inName.setText(res.business)
                         }
@@ -1183,6 +1216,24 @@ class FormActivity : AppCompatActivity() {
 
     private fun hasAnyPhoto() = photoTaken || !(editing?.photoName.isNullOrBlank())
 
+    private fun tilOf(f: View): com.google.android.material.textfield.TextInputLayout? {
+        var p = f.parent
+        while (p != null && p !is com.google.android.material.textfield.TextInputLayout) p = p.parent
+        return p as? com.google.android.material.textfield.TextInputLayout
+    }
+
+    /** Orange "check" note under a box filled from the signboard. */
+    private fun showBoardNote(f: TextInputEditText) {
+        val til = tilOf(f) ?: return
+        til.helperText = "Read from board: check"
+        til.setHelperTextColor(android.content.res.ColorStateList.valueOf(android.graphics.Color.rgb(230, 120, 0)))
+    }
+
+    private fun clearBoardNote(f: TextInputEditText) {
+        val til = tilOf(f) ?: return
+        if (til.helperText != null) { til.helperText = null; til.isHelperTextEnabled = false }
+    }
+
     private fun updateCellRadios() {
         rbCells.forEachIndexed { i, rb -> rb.isChecked = i == selPhone }
     }
@@ -1202,14 +1253,18 @@ class FormActivity : AppCompatActivity() {
             if (have.contains(n)) continue
             val i = have.indexOfFirst { it.isEmpty() }
             if (i < 0) break
-            inPhones[i].setText(n); have[i] = n; added++
+            boardFilling = true
+            inPhones[i].setText(n)
+            boardFilling = false
+            showBoardNote(inPhones[i])
+            have[i] = n; added++
         }
         return added
     }
 
     /** Reads the business name from the signboard with Gemini (never overwrites a typed name unless forced). */
     private fun readNameFromBoard(force: Boolean) {
-        if (!force && !inName.text.isNullOrBlank() && !phonesEmpty()) return
+        if (!force && !inName.text.isNullOrBlank() && !phonesEmpty() && !inOwner.text.isNullOrBlank()) return
         if (!Gemini.hasKey(this)) {
             if (force) {
                 AlertDialog.Builder(this)
@@ -1226,7 +1281,7 @@ class FormActivity : AppCompatActivity() {
         }
         if (file == null || !file.exists()) { if (force) toast("Take the shop photo first"); return }
         nameNote.setTextColor(ContextCompat.getColor(this, R.color.text_muted))
-        nameNote.text = "Reading name and cell numbers from signboard…"
+        nameNote.text = "Reading name, proprietor and cell numbers from signboard…"
         if (io.isShutdown) return
         io.execute {
             val res = Gemini.readName(this, file)
@@ -1237,8 +1292,18 @@ class FormActivity : AppCompatActivity() {
                     is Gemini.Result.Name -> {
                         if (res.name.isNotBlank() && (force || inName.text.isNullOrBlank())) inName.setText(res.name)
                         val added = fillEmptyPhones(res.phones)
+                        var ownerAdded = false
+                        if (res.owner.isNotBlank() && inOwner.text.isNullOrBlank()) {
+                            boardFilling = true
+                            inOwner.setText(res.owner)
+                            boardFilling = false
+                            ownerFromBoard = true
+                            showBoardNote(inOwner)
+                            ownerAdded = true
+                        }
                         nameNote.text = listOfNotNull(
                             if (res.name.isNotBlank()) "✓ Name read from signboard" else "No shop name found on the board",
+                            if (ownerAdded) "✓ Proprietor read: please check" else null,
                             when {
                                 added > 0 -> "✓ $added cell number(s) read: please check"
                                 res.phones.isEmpty() -> "No cell number on the board"

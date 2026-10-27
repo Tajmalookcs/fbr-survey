@@ -28,7 +28,7 @@ object Gemini {
 
     sealed class Result {
         /** name and/or cell numbers read from the signboard */
-        data class Name(val name: String, val phones: List<String> = emptyList()) : Result()
+        data class Name(val name: String, val phones: List<String> = emptyList(), val owner: String = "") : Result()
         /** read from another GPS camera app's stamp; null = not found */
         data class StampData(val name: String, val lat: Double?, val lng: Double?, val time: Long?) : Result()
         object NoName : Result()
@@ -51,17 +51,27 @@ object Gemini {
     private const val TOTAL_MS = 30_000L
 
     private const val PROMPT = """This is a photo of a shop front in Pakistan, taken for a tax survey.
-Read the shop's business name from its signboard. The signboard may be in Urdu or English.
-Give the name transliterated into English letters, in CAPITAL LETTERS, the way it is usually
-written in English in Pakistan (for example: ZAIN GENERAL STORE, MADINA KARYANA STORE,
-AL-SHIFA MEDICAL STORE, HAJI ZULFIQAR MACHINERY STORE).
-For the name, ignore phone numbers, addresses, slogans, owner names written as contact persons,
-product or brand advertisements (e.g. battery or drink brands), and any app stamp or text boxes.
-If no shop name is clearly readable, return an empty name.
-Also list the shop's mobile / phone numbers written on the signboard or shop front (at most 4),
-digits only, e.g. "03001234567". Do not include numbers from a GPS app stamp or brand advertisements.
-If none are readable, return an empty list.
-Reply with JSON only: {"name": "...", "phones": ["..."]}"""
+Read the signboard (Urdu and/or English) and reply with JSON only:
+{"name": "...", "owner": "...", "phones": ["..."]}
+
+name: the shop's business name, transliterated into English letters, in CAPITAL LETTERS, the way it is
+usually written in English in Pakistan (e.g. ZAIN GENERAL STORE, MADINA KARYANA STORE,
+AL-SHIFA MEDICAL STORE, HAJI MUHAMMAD ALI TRADERS). Ignore phone numbers, addresses, slogans,
+product or brand advertisements (e.g. battery or drink brands), and any GPS app stamp or text boxes.
+
+owner: the proprietor's personal name, in English CAPITAL LETTERS (e.g. HAJI MUHAMMAD ALI). Rules, in order:
+ 1. A name labelled Prop / Proprietor / پروپرائٹر / مالک → use it.
+ 2. Otherwise, if only one person's name appears on the board (even inside the shop name,
+    e.g. "Haji Muhammad Ali Traders" → HAJI MUHAMMAD ALI) → use it.
+ 3. Otherwise, with several person names: take the first one in reading order of the board's main
+    language: Urdu boards from the RIGHT side, English boards from the LEFT side.
+ Leave "" if no person's name is clearly readable.
+
+phones: mobile / phone numbers written on the board or shop front (at most 4), digits only,
+e.g. "03001234567". Include a number ONLY if every digit is clearly readable; skip any number that is
+blurry, cut off or uncertain. Never guess digits. Ignore numbers in a GPS app stamp or brand advertisements.
+
+Use "" or [] for anything not clearly readable."""
 
     private val pool = Executors.newCachedThreadPool()
 
@@ -81,13 +91,8 @@ Reply with JSON only: {"name": "...", "phones": ["..."]}"""
         val k = key(ctx)
         if (k.isEmpty()) return Result.NoKey
         if (!photoFile.exists()) return Result.Error("Photo not found")
-        val bmp = try { Photo.loadUpright(photoFile, 1280) } catch (e: Exception) { return Result.Error("Could not open photo") }
-        val small = scaleDown(bmp, 768)
-        val out = ByteArrayOutputStream()
-        small.compress(Bitmap.CompressFormat.JPEG, 70, out)
-        if (small != bmp) small.recycle()
-        bmp.recycle()
-        val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        // sharper picture so small numbers / names are readable
+        val b64 = encode(photoFile, 1600, 82) ?: return Result.Error("Could not open photo")
 
         val parts = JSONArray()
             .put(JSONObject().put("text", PROMPT))
@@ -97,7 +102,8 @@ Reply with JSON only: {"name": "...", "phones": ["..."]}"""
             is Raw.Ok -> {
                 val name = parseName(r.text).orEmpty()
                 val phones = parsePhones(r.text)
-                if (name.isBlank() && phones.isEmpty()) Result.NoName else Result.Name(name, phones)
+                val owner = parseField(r.text, "owner")
+                if (name.isBlank() && phones.isEmpty() && owner.isBlank()) Result.NoName else Result.Name(name, phones, owner)
             }
             is Raw.Fail -> r.result
         }
@@ -325,13 +331,23 @@ Reply with JSON only:
         return cleanPhones(raw)
     }
 
+    /** Keeps only valid Pakistani numbers: mobile 03 + 9 digits, landline 0 + city code (10–11 digits). */
     fun cleanPhones(raw: List<String>): List<String> = raw.mapNotNull { s ->
         var d = s.filter { it.isDigit() }
         if (d.startsWith("0092")) d = "0" + d.substring(4)
-        else if (d.startsWith("92") && d.length == 12) d = "0" + d.substring(2)
+        else if (d.startsWith("92") && d.length in 11..12) d = "0" + d.substring(2)
         else if (d.length == 10 && d.startsWith("3")) d = "0$d"
-        d.takeIf { it.length in 10..13 }
+        d.takeIf { MOBILE.matches(it) || LANDLINE.matches(it) }
     }.distinct().take(4)
+
+    private val MOBILE = Regex("03\\d{9}")
+    private val LANDLINE = Regex("0[1-24-9]\\d{8,9}")
+
+    private fun parseField(text: String, key: String): String {
+        val t = text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+        val raw = try { JSONObject(t).optString(key) } catch (e: Exception) { "" }
+        return raw.replace(Regex("\\s+"), " ").trim().uppercase(Locale.ENGLISH).take(60)
+    }
 
     private fun errMsg(json: String): String = try {
         JSONObject(json).getJSONObject("error").optString("message")

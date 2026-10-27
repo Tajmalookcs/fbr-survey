@@ -77,6 +77,7 @@ object Restamp {
                 var changed = false
                 if (res.name.isNotBlank()) { r.businessName = res.name; changed = true }
                 if (r.phone.isBlank() && res.phones.isNotEmpty()) { r.phone = res.phones.joinToString("\n"); changed = true }
+                if (r.ownerName.isBlank() && res.owner.isNotBlank()) { r.ownerName = res.owner; r.ownerFromBoard = true; changed = true }
                 changed
             }
             Gemini.Result.NoName, Gemini.Result.NoKey, is Gemini.Result.BadKey -> false

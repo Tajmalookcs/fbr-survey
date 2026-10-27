@@ -42,6 +42,8 @@ data class Record(
     var origUri: String = "",
     /** which Cell number (0 = first) is shown in the photo's white box */
     var stampPhone: Int = 0,
+    /** owner name was read from the signboard (FBR data may replace it) */
+    var ownerFromBoard: Boolean = false,
 ) {
     /** the number shown on the photo: the chosen one, else the first */
     fun stampPhoneNumber(): String? {
@@ -90,6 +92,7 @@ data class Record(
         put("crop", crop)
         put("origUri", origUri)
         put("stampPhone", stampPhone)
+        put("ownerFromBoard", ownerFromBoard)
     }
 
     companion object {
@@ -132,6 +135,7 @@ data class Record(
             crop = o.optString("crop"),
             origUri = o.optString("origUri"),
             stampPhone = o.optInt("stampPhone", 0),
+            ownerFromBoard = o.optBoolean("ownerFromBoard"),
             mapAddress = if (o.has("mapAddress")) o.optString("mapAddress") else o.optString("address"),
         )
     }
