@@ -31,9 +31,14 @@ object Photo {
 
     const val ALBUM = "FBR Survey"
 
-    fun stampDate(time: Long): String =
-        SimpleDateFormat("dd MMM yyyy hh:mm a", Locale.ENGLISH).format(Date(time))
-            .replace("AM", "am").replace("PM", "pm")
+    /** e.g. "Wednesday, 28/10/2026 04:11 PM GMT +05:00" */
+    fun stampDate(time: Long): String {
+        val d = Date(time)
+        val main = SimpleDateFormat("EEEE, dd/MM/yyyy hh:mm a", Locale.ENGLISH).format(d)
+            .replace("am", "AM").replace("pm", "PM")
+        val off = SimpleDateFormat("XXX", Locale.ENGLISH).format(d).let { if (it == "Z") "+00:00" else it }
+        return "$main GMT $off"
+    }
 
     /** Loads the camera file, scaled down to a safe size and turned upright. */
     fun loadUpright(file: File, maxSide: Int = 2560): Bitmap {
@@ -220,7 +225,7 @@ object Photo {
         val lines = mutableListOf<StaticLayout>()
         lines += layout(addressLine, big, textWidth, 3, center = true)
         lines += layout(String.format(Locale.ENGLISH, "Lat %.6f°  Long %.6f°", r.lat, r.lng), small, textWidth, 1, center = true)
-        val dateLayout = layout(stampDate(r.createdAt), yellow, textWidth, 1, center = true)
+        val dateLayout = layout(stampDate(r.createdAt), yellow, textWidth, 2, center = true)
         lines += dateLayout
 
         val gap = unit * 0.008f
@@ -290,13 +295,6 @@ object Photo {
         for (l in lines) {
             c.save()
             c.translate(textLeft, y)
-            if (l === dateLayout) {
-                // solid black box behind the date & time
-                val bx = unit * 0.015f
-                val byy = unit * 0.006f
-                c.drawRoundRect(l.getLineLeft(0) - bx, -byy, l.getLineRight(0) + bx, l.height + byy,
-                    unit * 0.008f, unit * 0.008f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK })
-            }
             l.draw(c)
             c.restore()
             y += l.height + gap
