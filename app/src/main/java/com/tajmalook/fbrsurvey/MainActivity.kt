@@ -67,6 +67,7 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.btnNew).setOnClickListener { startNewSurvey() }
         findViewById<View>(R.id.btnExport).setOnClickListener { export() }
+        findViewById<View>(R.id.btnExportPhotos).setOnClickListener { exportPhotos() }
         findViewById<android.widget.EditText>(R.id.inSearch).addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -421,6 +422,122 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    // ---------- photos export (ZIP, same dates and order as Excel) ----------
+
+    private fun exportPhotos() {
+        if (allRecords.isEmpty()) {
+            Toast.makeText(this, "No records to export yet", Toast.LENGTH_SHORT).show(); return
+        }
+        val dayFmt = SimpleDateFormat("dd.MM.yyyy", Locale.ENGLISH)
+        val byDay = allRecords.groupBy { dayFmt.format(Date(it.shownTime().takeIf { t -> t > 0 } ?: it.createdAt)) }
+        val days = byDay.keys.sortedByDescending { dayFmt.parse(it)?.time ?: 0L }
+        val choices = days.map { "$it  (${byDay[it]!!.size} shops)" } + "All dates  (${allRecords.size} shops)"
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(pad + pad / 2, pad / 2, pad + pad / 2, 0)
+        }
+        val label = TextView(this).apply { text = "Which shops?" }
+        val spinner = android.widget.Spinner(this).apply {
+            adapter = android.widget.ArrayAdapter(this@MainActivity,
+                android.R.layout.simple_spinner_dropdown_item, choices)
+        }
+        box.addView(label); box.addView(spinner)
+        AlertDialog.Builder(this)
+            .setTitle("Export photos")
+            .setMessage("All photos in one ZIP file, numbered like the Excel sheet.")
+            .setView(box)
+            .setPositiveButton("Export") { _, _ ->
+                val day = days.getOrNull(spinner.selectedItemPosition)
+                val chosen = if (day != null) byDay[day]!! else allRecords
+                writePhotosZip(day, chosen.sortedBy { it.shownTime().takeIf { t -> t > 0 } ?: it.createdAt })
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /** Stamped photo bytes: the gallery copy, or redrawn from the saved clean copy if it was deleted. */
+    private fun photoBytes(r: Record): ByteArray? {
+        if (r.photoUri.isNotBlank()) try {
+            val u = Uri.parse(r.photoUri)
+            if (Photo.galleryExists(this, u)) contentResolver.openInputStream(u)?.use { return it.readBytes() }
+        } catch (e: Exception) { }
+        val raw = Store.rawPhoto(this, r.id)
+        if (!raw.exists()) return null
+        return try {
+            val photo = Photo.applyCrop(Photo.loadUpright(raw), r.crop)
+            val map = android.graphics.BitmapFactory.decodeFile(Store.mapFile(this, r.id).absolutePath)
+                ?: Geo.mapThumb(r.lat, r.lng, online = false)
+            Photo.stamp(photo, map, r)
+            val out = java.io.ByteArrayOutputStream()
+            photo.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, out)
+            photo.recycle()
+            out.toByteArray()
+        } catch (e: Throwable) { null }
+    }
+
+    private fun writePhotosZip(day: String?, data: List<Record>) {
+        @Suppress("DEPRECATION")
+        val progress = android.app.ProgressDialog(this).apply {
+            setMessage("Preparing photos…"); setCancelable(false); show()
+        }
+        io.execute {
+            try {
+                val dayFmt = SimpleDateFormat("dd.MM.yyyy", Locale.ENGLISH)
+                val place = data.firstOrNull { it.area.isNotBlank() }?.area?.split(",")?.first()?.trim().orEmpty()
+                val datePart = day ?: ("ALL_" + dayFmt.format(Date()))
+                val name = listOf("PHOTOS", datePart, Photo.safeFileName(place))
+                    .filter { it.isNotBlank() }.joinToString("_") + ".zip"
+                val dir = File(cacheDir, "exports").apply { mkdirs() }
+                dir.listFiles()?.forEach { it.delete() }
+                val file = File(dir, name)
+                var added = 0
+                var skipped = 0
+                java.util.zip.ZipOutputStream(file.outputStream().buffered()).use { zip ->
+                    zip.setLevel(1)   // photos are already compressed
+                    data.forEachIndexed { i, r ->
+                        runOnUiThread { progress.setMessage("Preparing photo ${i + 1} / ${data.size}…") }
+                        val bytes = if (r.photoName.isBlank() && !Store.rawPhoto(this, r.id).exists()) null else photoBytes(r)
+                        if (bytes == null) { skipped++; return@forEachIndexed }
+                        val shop = Photo.safeFileName(r.businessName.uppercase(Locale.ENGLISH)).ifBlank { "SHOP" }
+                        zip.putNextEntry(java.util.zip.ZipEntry(String.format(Locale.ENGLISH, "%02d_%s.jpg", i + 1, shop)))
+                        zip.write(bytes)
+                        zip.closeEntry()
+                        added++
+                    }
+                }
+                if (added == 0) {
+                    file.delete()
+                    runOnUiThread {
+                        progress.dismiss()
+                        Toast.makeText(this, "No photos to export for these shops", Toast.LENGTH_LONG).show()
+                    }
+                    return@execute
+                }
+                val savedTo = try { copyToDownloads(file, "application/zip") } catch (e: Exception) { null }
+                runOnUiThread {
+                    progress.dismiss()
+                    val msg = "$added photo(s) exported" + (if (skipped > 0) ", $skipped shop(s) without photo skipped" else "") +
+                        (if (savedTo != null) "\nSaved to $savedTo" else "")
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                    val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
+                    val share = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/zip"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, name)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivity(Intent.createChooser(share, "Share photos (ZIP)"))
+                }
+            } catch (e: Throwable) {
+                runOnUiThread {
+                    progress.dismiss()
+                    Toast.makeText(this, "Photo export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     private fun writeExcel(title: String, day: String?, data: List<Record>) {
         io.execute {
             try {
@@ -479,11 +596,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Keeps a copy in Downloads/FBR Survey so the file is easy to find later. */
-    private fun copyToDownloads(src: File): String {
+    private fun copyToDownloads(src: File,
+                                mime: String = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"): String {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, src.name)
-                put(MediaStore.Downloads.MIME_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                put(MediaStore.Downloads.MIME_TYPE, mime)
                 put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/" + Photo.ALBUM)
             }
             val uri: Uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)

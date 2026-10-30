@@ -89,9 +89,9 @@
             android:layout_width="0dp"
             android:layout_height="56dp"
             android:layout_marginEnd="6dp"
-            android:layout_weight="1.4"
+            android:layout_weight="1.2"
             android:text="New survey"
-            android:textSize="16sp" />
+            android:textSize="15sp" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnExport"
@@ -100,8 +100,22 @@
             android:layout_height="56dp"
             android:layout_marginStart="6dp"
             android:layout_weight="1"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
             android:text="Export Excel"
-            android:textSize="15sp" />
+            android:textSize="13sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnExportPhotos"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="6dp"
+            android:layout_weight="1"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:text="Export photos"
+            android:textSize="13sp" />
     </LinearLayout>
 
     <com.google.android.material.textfield.TextInputLayout
