@@ -1012,6 +1012,11 @@ class FormActivity : AppCompatActivity() {
             startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(r.photoUri), "image/*")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
         }
+        findViewById<MaterialButton>(R.id.btnDirections).apply {
+            visibility = View.VISIBLE
+            setOnClickListener { editing?.let { Geo.openDirections(this@FormActivity, it.lat, it.lng) } }
+        }
+        updateDirectionsButton()
         findViewById<MaterialButton>(R.id.btnGetAddress).apply {
             visibility = View.VISIBLE
             setOnClickListener { editing?.let { getFromSavedLocation(it) } }
@@ -1046,6 +1051,7 @@ class FormActivity : AppCompatActivity() {
                         if (editing?.id == r.id && !retakePending) {
                             editing = r
                             if (r.isImported()) loadImportState(r)
+                            updateDirectionsButton()
                         }
                         updateRealViews()
                         reloadPreview()
@@ -1232,6 +1238,11 @@ class FormActivity : AppCompatActivity() {
     private fun clearBoardNote(f: TextInputEditText) {
         val til = tilOf(f) ?: return
         if (til.helperText != null) { til.helperText = null; til.isHelperTextEnabled = false }
+    }
+
+    private fun updateDirectionsButton() {
+        val r = editing ?: return
+        findViewById<View>(R.id.btnDirections).alpha = if (r.lat == 0.0 && r.lng == 0.0) 0.4f else 1f
     }
 
     private fun updateCellRadios() {

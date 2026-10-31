@@ -197,4 +197,23 @@ object Geo {
         })
         c.drawCircle(cx, headY, r * 0.38f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(165, 32, 25) })
     }
+
+    /** Opens Google Maps directions from the current position to the shop's saved coordinates. */
+    fun openDirections(ctx: android.content.Context, lat: Double, lng: Double) {
+        if (lat == 0.0 && lng == 0.0) {
+            android.widget.Toast.makeText(ctx, "No location saved for this shop", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val dest = String.format(java.util.Locale.ENGLISH, "%.6f,%.6f", lat, lng)
+        val uri = android.net.Uri.parse("https://www.google.com/maps/dir/?api=1&destination=$dest&travelmode=driving")
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+        try {
+            ctx.startActivity(android.content.Intent(intent).setPackage("com.google.android.apps.maps"))
+        } catch (e: Exception) {
+            try { ctx.startActivity(intent) }   // no Google Maps app: open in the browser
+            catch (e2: Exception) {
+                android.widget.Toast.makeText(ctx, "No maps app or browser found", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 }

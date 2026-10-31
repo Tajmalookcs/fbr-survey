@@ -646,6 +646,9 @@ class MainActivity : AppCompatActivity() {
             val upd = v.findViewById<View>(R.id.btnRowUpdate)
             upd.visibility = if (r.photoName.isNotBlank() && (r.mapAddress.isBlank() || !r.mapReal || r.businessName.isBlank() || r.source == "pending")) View.VISIBLE else View.GONE
             upd.setOnClickListener { updateOne(r) }
+            val dir = v.findViewById<View>(R.id.btnRowDir)
+            dir.alpha = if (r.lat == 0.0 && r.lng == 0.0) 0.35f else 1f
+            dir.setOnClickListener { Geo.openDirections(this@MainActivity, r.lat, r.lng) }
 
             val img = v.findViewById<ImageView>(R.id.thumb)
             img.tag = r.photoUri
