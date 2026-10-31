@@ -26,7 +26,7 @@ object Restamp {
                 changed = true
             }
         }
-        if (!r.mapReal) {
+        if (!r.mapReal || (r.isImported() && r.addStamp && !Store.mapFile(ctx, r.id).exists())) {
             val m = Geo.mapThumbResult(r.lat, r.lng)
             if (m.real) {
                 Store.mapFile(ctx, r.id).outputStream().use { m.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }

@@ -200,7 +200,7 @@ object Photo {
     }
 
     fun stamp(photo: Bitmap, map: Bitmap, r: Record): Bitmap {
-        if (r.isImported()) return stampImported(photo, r)
+        if (r.isImported() && !(r.addStamp && r.canStamp())) return if (r.whiteBox) stampImported(photo, r) else photo
         val w = photo.width
         val h = photo.height
         val unit = min(w, h).toFloat()
@@ -225,7 +225,7 @@ object Photo {
         val lines = mutableListOf<StaticLayout>()
         lines += layout(addressLine, big, textWidth, 3, center = true)
         lines += layout(String.format(Locale.ENGLISH, "Lat %.6f°  Long %.6f°", r.lat, r.lng), small, textWidth, 1, center = true)
-        val dateLayout = layout(stampDate(r.createdAt), yellow, textWidth, 2, center = true)
+        val dateLayout = layout(stampDate(if (r.isImported()) r.photoTime else r.createdAt), yellow, textWidth, 2, center = true)
         lines += dateLayout
 
         val gap = unit * 0.008f
@@ -272,12 +272,14 @@ object Photo {
         val c = Canvas(photo)
 
         // white box
-        c.drawRoundRect(boxX, boxTop, boxX + boxW, boxTop + boxH, unit * 0.015f, unit * 0.015f,
-            Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 255, 255, 255) })
-        var by = boxTop + inner
-        for (l in boxLines) {
-            c.save(); c.translate(boxX + inner, by); l.draw(c); c.restore()
-            by += l.height + boxGap
+        if (r.whiteBox) {
+            c.drawRoundRect(boxX, boxTop, boxX + boxW, boxTop + boxH, unit * 0.015f, unit * 0.015f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(235, 255, 255, 255) })
+            var by = boxTop + inner
+            for (l in boxLines) {
+                c.save(); c.translate(boxX + inner, by); l.draw(c); c.restore()
+                by += l.height + boxGap
+            }
         }
 
         // black strip

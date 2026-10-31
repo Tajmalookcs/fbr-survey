@@ -113,6 +113,9 @@ class FormActivity : AppCompatActivity() {
     private var pickedUri = ""
     private var pickedName = ""
     private var stampNote: String? = null
+    /** imported photo: full stamp from photo data / white details box */
+    private var addStamp = false
+    private var whiteBox = true
     private var pendingCrop = ""
     private var wantCamera = false
     private lateinit var importBox: View
@@ -308,6 +311,17 @@ class FormActivity : AppCompatActivity() {
         tvCoordSource = findViewById(R.id.tvCoordSource)
         findViewById<View>(R.id.btnGallery).setOnClickListener { pickFromGallery() }
         findViewById<View>(R.id.btnCrop).setOnClickListener { openCrop() }
+        findViewById<View>(R.id.btnStampToggle).setOnClickListener {
+            if (!addStamp && !canStampNow()) { toast("No location/date in photo data: can't stamp"); return@setOnClickListener }
+            addStamp = !addStamp
+            updateImportBox()
+            toast(if (addStamp) "Stamp will be added. Tap Save." else "Stamp removed. Tap Save.")
+        }
+        findViewById<View>(R.id.btnBoxToggle).setOnClickListener {
+            whiteBox = !whiteBox
+            updateImportBox()
+            toast(if (whiteBox) "White box will be shown. Tap Save." else "White box removed. Tap Save.")
+        }
         val id = intent.getLongExtra(EXTRA_ID, -1L)
         if (id != -1L) {
             setupEdit(id)
@@ -345,6 +359,8 @@ class FormActivity : AppCompatActivity() {
             pickedUri = savedInstanceState.getString("pickedUri").orEmpty()
             pickedName = savedInstanceState.getString("pickedName").orEmpty()
             pendingCrop = savedInstanceState.getString("pendingCrop").orEmpty()
+            addStamp = savedInstanceState.getBoolean("addStamp")
+            whiteBox = savedInstanceState.getBoolean("whiteBox", true)
             updateImportBox()
             if (photoTaken) showPreview()
             updatePhotoButton()
@@ -390,6 +406,8 @@ class FormActivity : AppCompatActivity() {
         outState.putString("pickedUri", pickedUri)
         outState.putString("pickedName", pickedName)
         outState.putString("pendingCrop", pendingCrop)
+        outState.putBoolean("addStamp", addStamp)
+        outState.putBoolean("whiteBox", whiteBox)
     }
 
     override fun onSupportNavigateUp(): Boolean {
@@ -537,6 +555,11 @@ class FormActivity : AppCompatActivity() {
         io.execute {
             val ex = try { Importer.copy(this, uri, captureFile) } catch (e: Exception) { null }
             val dn = Importer.displayName(this, uri)
+            // is another app's stamp already printed on the photo?
+            val printed = ex != null && try {
+                val b = Photo.loadUpright(captureFile, 1200)
+                (Photo.stampTop(b) != null).also { b.recycle() }
+            } catch (e: Throwable) { false }
             runOnUiThread {
                 progress.dismiss()
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -558,6 +581,9 @@ class FormActivity : AppCompatActivity() {
                 stampNote = null
                 if (ex.lat != null && ex.lng != null) { coordsFrom = "photo data"; setImportCoords(ex.lat, ex.lng) }
                 impSource = if (hasLocation && impTime > 0) "photo" else "pending"
+                whiteBox = true
+                // full stamp by default only for photos without a printed stamp that have location + date in their data
+                addStamp = !printed && canStampNow()
                 showPreview()
                 markRetake()
                 updateRealViews()
@@ -640,6 +666,17 @@ class FormActivity : AppCompatActivity() {
             else -> "📍 Location not found in photo"
         }
         tvCoordSource.text = listOfNotNull(loc, stampNote).joinToString("\n")
+        val can = canStampNow()
+        if (addStamp && !can) addStamp = false
+        (findViewById<View>(R.id.btnStampToggle) as MaterialButton).apply {
+            text = if (addStamp) "Remove stamp" else "Add stamp"
+            alpha = if (addStamp || can) 1f else 0.4f
+        }
+        (findViewById<View>(R.id.btnBoxToggle) as MaterialButton).text = if (whiteBox) "Remove white box" else "Add white box"
+        findViewById<TextView>(R.id.tvStampNote).apply {
+            visibility = if (!can) View.VISIBLE else View.GONE
+            text = "No location/date in photo data: can't stamp"
+        }
     }
 
     /** Leaves import mode when a camera photo replaces the imported one. Returns true if it was imported. */
@@ -648,13 +685,24 @@ class FormActivity : AppCompatActivity() {
         importMode = false
         impSource = "camera"; impTime = 0L; impTimeFrom = ""; coordsFrom = ""
         pickedUri = ""; pickedName = ""; stampNote = null
+        addStamp = false; whiteBox = true
         pendingCrop = ""
         updateImportBox()
         return was
     }
 
+    /** location AND date both from the photo's own data (never from a guess or the stamp reading) */
+    private fun canStampNow(): Boolean {
+        val e = if (retakePending) null else editing
+        val hasLoc = if (e != null) !(e.lat == 0.0 && e.lng == 0.0) else hasLocation
+        return impSource == "photo" && hasLoc && impTime > 0 &&
+            coordsFrom == "photo data" && impTimeFrom == "photo data"
+    }
+
     private fun loadImportState(r: Record) {
         importMode = r.isImported()
+        addStamp = r.addStamp
+        whiteBox = r.whiteBox
         impSource = r.source
         impTime = r.photoTime
         impTimeFrom = if (r.source == "stamp") "stamp" else "photo data"
@@ -832,7 +880,10 @@ class FormActivity : AppCompatActivity() {
             val nAddr = autoAddress.orEmpty(); val mf = mapFuture
             val imp = importMode; val src = impSource; val pTime = impTime
             val pUri = pickedUri; val pName = pickedName
+            val aStamp = addStamp; val wBox = whiteBox
             if (!imp) e.crop = pendingCrop
+            if (imp) { e.addStamp = aStamp; e.whiteBox = wBox } else { e.addStamp = false; e.whiteBox = true }
+            if (!retake && e.isImported() && e.addStamp && !Store.mapFile(this, e.id).exists()) e.mapReal = false
             io.execute {
                 if (retake) try {
                     // replace the photo: new clean copy, new map, new time + GPS of the new photo
@@ -850,7 +901,7 @@ class FormActivity : AppCompatActivity() {
                     }
                     Store.mapFile(this, e.id).outputStream().use { mr.bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                     e.createdAt = ntime; e.lat = nla; e.lng = nln; e.accuracy = nacc
-                    e.mapAddress = nAddr; e.mapReal = imp || mr.real
+                    e.mapAddress = nAddr; e.mapReal = mr.real
                     e.source = if (imp) src else "camera"
                     e.photoTime = if (imp) pTime else 0L
                     e.coordsManual = false
@@ -918,6 +969,7 @@ class FormActivity : AppCompatActivity() {
         val imp = importMode; val src = impSource; val pTime = impTime
         val crop = if (importMode) "" else pendingCrop
         val pUri = pickedUri; val pName = pickedName
+        val aStamp = imp && addStamp; val wBox = !imp || whiteBox
         val noCnic = cbNoCnic.isChecked
         val useManual = useManualOnPhoto && address.isNotBlank()
         val stampAddr = autoAddress.orEmpty()   // real address from GPS, not the edited field
@@ -935,7 +987,7 @@ class FormActivity : AppCompatActivity() {
                 val draft = Record(
                     id = time, createdAt = time,
                     surveyor = surveyor, formation = formation, area = area, market = market,
-                    cnicNotProvided = noCnic, mapReal = imp || mr.real, mapAddress = stampAddr, stampUseManual = useManual,
+                    cnicNotProvided = noCnic, mapReal = mr.real, addStamp = aStamp, whiteBox = wBox, mapAddress = stampAddr, stampUseManual = useManual,
                     source = if (imp) src else "camera", photoTime = if (imp) pTime else 0L,
                     crop = crop,
                     businessName = name, ownerName = owner, cnic = cnic, phone = phone, address = address,
@@ -947,6 +999,7 @@ class FormActivity : AppCompatActivity() {
                 if (imp) {
                     // original stays untouched: a copy with only the white details box goes to the gallery
                     captureFile.copyTo(Store.rawPhoto(this, time), overwrite = true)
+                    Store.mapFile(this, time).outputStream().use { map.compress(Bitmap.CompressFormat.PNG, 100, it) }
                     val res = Restamp.redraw(this, draft)
                     captureFile.delete()
                     runOnUiThread {
@@ -957,7 +1010,7 @@ class FormActivity : AppCompatActivity() {
                         switchToEdit(draft)
                         reloadPreview()
                     }
-                    if (draft.mapAddress.isBlank() || draft.businessName.isBlank() || draft.source == "pending") backgroundFill(draft)
+                    if (!draft.mapReal || draft.mapAddress.isBlank() || draft.businessName.isBlank() || draft.source == "pending") backgroundFill(draft)
                     return@execute
                 }
 

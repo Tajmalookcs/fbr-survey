@@ -44,7 +44,14 @@ data class Record(
     var stampPhone: Int = 0,
     /** owner name was read from the signboard (FBR data may replace it) */
     var ownerFromBoard: Boolean = false,
+    /** imported photo: add the app's full stamp (map, address, Lat/Long, taken date) from the photo data */
+    var addStamp: Boolean = false,
+    /** show the white details box on the photo */
+    var whiteBox: Boolean = true,
 ) {
+    /** imported photo whose location AND date both came from the photo's own data */
+    fun canStamp() = source == "photo" && !(lat == 0.0 && lng == 0.0) && photoTime > 0
+
     /** the number shown on the photo: the chosen one, else the first */
     fun stampPhoneNumber(): String? {
         val l = phone.lines().map { it.trim() }.filter { it.isNotEmpty() }
@@ -93,6 +100,8 @@ data class Record(
         put("origUri", origUri)
         put("stampPhone", stampPhone)
         put("ownerFromBoard", ownerFromBoard)
+        put("addStamp", addStamp)
+        put("whiteBox", whiteBox)
     }
 
     companion object {
@@ -136,6 +145,8 @@ data class Record(
             origUri = o.optString("origUri"),
             stampPhone = o.optInt("stampPhone", 0),
             ownerFromBoard = o.optBoolean("ownerFromBoard"),
+            addStamp = o.optBoolean("addStamp", false),
+            whiteBox = o.optBoolean("whiteBox", true),
             mapAddress = if (o.has("mapAddress")) o.optString("mapAddress") else o.optString("address"),
         )
     }
